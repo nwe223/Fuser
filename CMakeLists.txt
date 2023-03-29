@@ -205,6 +205,7 @@ if (PROJECT_IS_TOP_LEVEL)
   install(TARGETS ${NVFUSER_CODEGEN} EXPORT NvfuserTargets DESTINATION "${NVFUSER_LIB_DIR}")
 else()
   file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/nvfuser")
+  target_link_libraries(${NVFUSER_CODEGEN} PRIVATE torch ${TORCHLIB_FLAVOR})
   # installing nvfuser python tests
   install(DIRECTORY "${NVFUSER_ROOT}/python_tests/"
   	DESTINATION "${TORCH_ROOT}/test/_nvfuser"
