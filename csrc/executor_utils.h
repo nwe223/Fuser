@@ -8,11 +8,10 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 
 #include <c10/core/DeviceType.h>
 #include <c10/util/Exception.h>
-
-#include <cuda.h>
 
 #include <torch/csrc/jit/ir/ir.h>
 
@@ -36,20 +35,6 @@ namespace nvfuser {
                 << nvrtcGetErrorString(_result) << '\n'; \
       exit(1);                                           \
     }                                                    \
-  } while (0)
-
-#define CUDA_SAFE_CALL(x)                                              \
-  do {                                                                 \
-    CUresult _result = x;                                              \
-    if (_result != CUDA_SUCCESS) {                                     \
-      const char* msg;                                                 \
-      const char* name;                                                \
-      cuGetErrorName(_result, &name);                                  \
-      cuGetErrorString(_result, &msg);                                 \
-      std::cerr << "\nerror: " << name << " failed with error " << msg \
-                << '\n';                                               \
-      exit(1);                                                         \
-    }                                                                  \
   } while (0)
 
 #define CUDA_RT_SAFE_CALL(x)                                            \

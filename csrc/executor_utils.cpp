@@ -1362,7 +1362,7 @@ std::tuple<NvrtcFunction, std::string, std::vector<char>> nvrtcCompile(
     FUSER_PERF_SCOPE("executor_utils::Nvrtc::LoadPTX");
 
     // load ptx or cubin directly
-    CUDA_SAFE_CALL(cuModuleLoadDataEx(
+    AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadDataEx(
         &(compiled_kernel_.module),
         ptx.data(),
         options.size(),
@@ -1375,7 +1375,7 @@ std::tuple<NvrtcFunction, std::string, std::vector<char>> nvrtcCompile(
     }
   }
 
-  CUDA_SAFE_CALL(cuModuleGetFunction(
+  AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleGetFunction(
       &(compiled_kernel_.function),
       compiled_kernel_.module,
       lowered_kernel_name_str.c_str()));
