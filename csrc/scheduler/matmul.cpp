@@ -14,6 +14,8 @@
 // NOTE: included to avoid compilation error caused by missing destructor in
 // 'SchedulerRuntimeInfo'
 #include <executor_utils.h>
+#include "c10/util/Exception.h"
+#include "ir_interface_nodes.h"
 
 namespace nvfuser {
 
@@ -166,7 +168,7 @@ void prologSwizzle(TensorView* shared_mem_tv, const MatmulParams& params) {
      */
 
     // number of units per row
-    int row_stride = tile_size_y / items_per_unit;
+    int row_stride = (int)(tile_size_y / (int64_t)items_per_unit);
 
     /* So the bank conflicting problem is now converted to the following game:
      *   I have a clock that has one pointer and `num_megabanks` ticks. I start
@@ -368,7 +370,7 @@ void prologSwizzle(TensorView* shared_mem_tv, const MatmulParams& params) {
     // [matrix id, repeat, pattern, matrix id, matrix]
     int swizzle_period = ldmatrix_rows / repeated_pattern_size;
     TORCH_INTERNAL_ASSERT(
-        tile_size_y % (swizzle_period * ldmatrix_cols) == 0,
+        tile_size_y % (int64_t)(swizzle_period * ldmatrix_cols) == 0,
         "need aperiodic swizzle config for tile size ",
         tile_size_x,
         "x",
@@ -441,11 +443,10 @@ void scheduleProlog(TensorView* shared_mem_tv, const MatmulParams& params) {
 void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
   const auto& inputs = fusion->inputs();
   const auto& outputs = fusion->outputs();
-  const auto mma_ops = ir_utils::getMmaOps(fusion);
 
   TORCH_INTERNAL_ASSERT(
-      inputs.size() == 2,
-      "scheduleMatmul supports only fusions with two inputs");
+      inputs.size() >= 2,
+      "scheduleMatmul supports only fusions with at least two inputs");
   TORCH_INTERNAL_ASSERT(
       outputs.size() == 1,
       "scheduleMatmul supports only fusions with single output");
@@ -460,23 +461,29 @@ void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
       outputs[0]->isA<TensorView>(),
       "fusion's output is not an instance of TensorView class");
 
-  TORCH_INTERNAL_ASSERT(
-      mma_ops.size() == 1,
-      "scheduleMatmul supports fusion with single mma op in definition, got ",
-      mma_ops.size());
-  TORCH_INTERNAL_ASSERT(
-      mma_ops.front()->layout().has_value(),
-      "fusion mma op has undefined input layout");
+  {
+    const auto mma_ops = ir_utils::getMmaOps(fusion);
+    TORCH_INTERNAL_ASSERT(
+        mma_ops.size() == 1,
+        "scheduleMatmul supports fusion with single mma op in definition, got ",
+        mma_ops.size());
+    TORCH_INTERNAL_ASSERT(
+        mma_ops.front()->layout().has_value(),
+        "fusion mma op has undefined input layout");
+  }
 
   TensorView* a = inputs[0]->as<TensorView>();
   TensorView* b = inputs[1]->as<TensorView>();
   TensorView* c = outputs[0]->as<TensorView>();
 
   // Collect mma swizzle info
-  const auto layout = mma_ops.front()->layout().value();
+  auto mma = ir_utils::getMmaOps(fusion).front();
+  TORCH_INTERNAL_ASSERT(mma->layout(), "mma op layout is not initialized");
+  const auto layout = mma->layout().value();
   auto mma_builder =
       MmaBuilder(params.mma_macro, params.tile_sizes).layout(layout);
   const auto& gemm_tile = params.tile_sizes;
+  const bool has_epilogue = !mma->out()->isFusionOutput();
 
   // Including current tensor naming convention for reference,
   //  this is very temporary and will change over time and
@@ -500,14 +507,16 @@ void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
   //  register tensor input to the actual mma op: ab, bb (short for a/b
   //  broadcasted)
   //
-  //  accumulator register: cc (short for c cache)
+  //  accumulator register: mma_result
+  //   - mma_result is MmaOp output if there is epilogue
+  //   - mma_result is cc (short for c cache) if there is no epilogue
   //
   //  result in global memory: c
 
   // Currently only support a, b, c as fusion inputs/outputs
   //  aka. no prolog and epilog fusion yet.
 
-  mma_builder.configureMma(c);
+  mma_builder.configureMma(mma);
 
   // TODO:
   // Beyond this point, mma_builder really just becomes a populated
@@ -521,16 +530,20 @@ void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
   //   TODO: this section goes to a separate matmul util,
   //   and needs more configurability.
 
-  // Setup accumulator register.
-  auto cc = c->cacheBefore();
-
   // Get the input to the mma op.
-  auto mma = cc->definition()->as<MmaOp>();
   auto ab = mma->inA()->as<TensorView>();
   auto bb = mma->inB()->as<TensorView>();
 
+  // Setup accumulator register.
+  auto cc = c->cacheBefore();
+  // Mma object is valid only because cacheBefore has been done on
+  //  TV which is not output of MmaOp, as there is an epilogue
+  auto mma_result = has_epilogue ? mma->out()->as<TensorView>() : cc;
+  // Clear MmaOp pointer, it's not needed from now on
+  mma = nullptr;
+
   // Set accumulation tv for mma op.
-  mma_builder.accumulatorTv(cc);
+  mma_builder.accumulatorTv(mma_result);
 
   // Staging register for global memory load
   TensorView *ar = a, *br = b;
@@ -621,41 +634,41 @@ void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
 
   // Make a CTA tile
   // ------------------------------------------------------------------
-  mma_utils::canonicalizeMmaTvOrdering(cc);
+  mma_utils::canonicalizeMmaTvOrdering(mma_result);
   // [... M,N,K]
-  mma_utils::makeTile(cc, gemm_tile.cta_tile.toVector());
+  mma_utils::makeTile(mma_result, gemm_tile.cta_tile.toVector());
 
   // Swizzle block tiles:
   if (params.grid_swizzle_factor != 1) {
     int factor = std::max(1, params.grid_swizzle_factor); // must be >=1
     if (params.cta_order == MatmulParams::TileRasterizationOrder::RowMajor) {
-      cc->split(1, factor);
+      mma_result->split(1, factor);
       // [I1, I2/factor, factor]
-      cc->reorder({{1, 2}});
+      mma_result->reorder({{1, 2}});
       // [I1, factor, I2/factor]
-      cc->merge(0);
+      mma_result->merge(0);
       // [I1*factor, I2/factor]
     } else if (
         params.cta_order == MatmulParams::TileRasterizationOrder::ColumnMajor) {
-      cc->split(0, factor);
+      mma_result->split(0, factor);
       // [I1/factor, factor, I2]
-      cc->reorder({{1, 2}});
+      mma_result->reorder({{1, 2}});
       // [I1/factor, I2, factor]
-      cc->merge(1);
+      mma_result->merge(1);
       // [I1/factor, I2*factor]
     }
   }
 
   // [Mo, No, Ko, Mi, Ni, Ki]
   // Propagate tiling globally
-  scheduler_utils::transformPropagateToAllFrom(cc, -1);
+  scheduler_utils::transformPropagateToAllFrom(mma_result, -1);
 
   // Schedule warp tile
-  mma_utils::scheduleWarpTileWithReduction(cc, gemm_tile);
+  mma_utils::scheduleWarpTileWithReduction(mma_result, gemm_tile);
 
   // Propagate warp tile to main loop and epilog/output tvs
   scheduler_utils::BoundedDirectionalTransformPropagator::bothWays(
-      cc, -1, {acw_smem, bcw_smem}, {c});
+      mma_result, -1, {acw_smem, bcw_smem}, {c});
 
   // Schedule prolog:
   //   TODO: this section needs more configurability.
@@ -690,7 +703,7 @@ void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
       scheduler_utils::BoundedDirectionalTransformPropagator::Options()
           .propagateParallelType());
 
-  cc->applyMmaSwizzle(
+  mma_result->applyMmaSwizzle(
       mma_builder.operand(MmaOptions::Operand::Accumulator).build());
 
   // Set parallelization:
@@ -706,23 +719,23 @@ void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
   // [Mo No Ko Kwo Mwo Nwo Mw Nw (Mi Ni Ki)]
   switch (params.cta_order) {
     case MatmulParams::TileRasterizationOrder::RowMajor:
-      cc->axis(0)->parallelize(ParallelType::BIDx);
-      cc->axis(1)->parallelize(ParallelType::BIDy);
+      mma_result->axis(0)->parallelize(ParallelType::BIDx);
+      mma_result->axis(1)->parallelize(ParallelType::BIDy);
       break;
     case MatmulParams::TileRasterizationOrder::ColumnMajor:
-      cc->axis(0)->parallelize(ParallelType::BIDy);
-      cc->axis(1)->parallelize(ParallelType::BIDx);
+      mma_result->axis(0)->parallelize(ParallelType::BIDy);
+      mma_result->axis(1)->parallelize(ParallelType::BIDx);
       break;
     default:
       TORCH_INTERNAL_ASSERT(
           false, "Invalid TileRasterizationOrder passed to Matmul scheduler");
   }
 
-  cc->axis(4)->parallelize(ParallelType::TIDz);
-  cc->axis(5)->parallelize(ParallelType::TIDy);
+  mma_result->axis(4)->parallelize(ParallelType::TIDz);
+  mma_result->axis(5)->parallelize(ParallelType::TIDy);
 
   scheduler_utils::parallelizeAllLike(
-      cc,
+      mma_result,
       -1,
       {acr, bcr, ab, bb, a, b},
       {ParallelType::TIDy, ParallelType::TIDz});
@@ -731,7 +744,7 @@ void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
   inlineMost(ir_utils::allTvsExcept(fusion, {acr, bcr, ab, bb, c}));
 
   // if auto inline, will inline to position-7, leads to performance regression
-  inlineSelectedAt({acr, bcr, ab, bb}, cc, 6);
+  inlineSelectedAt({acr, bcr, ab, bb}, mma_result, 6);
 
   // Propagate mma output swizzle and parallelization down the DAG
   if (params.double_buffer_options.double_buffer_smem_write) {
@@ -756,7 +769,7 @@ void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
   }
 
   scheduler_utils::BoundedDirectionalTransformPropagator::forward(
-      cc,
+      mma_result,
       -1,
       {c},
       scheduler_utils::BoundedDirectionalTransformPropagator::Options()
@@ -767,7 +780,7 @@ void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
 
   if (params.double_buffer_options.double_buffer_smem_read &&
       params.double_buffer_options.double_buffer_smem_write) {
-    scheduler_utils::rotateLoop(cc, 2, {acr, bcr});
+    scheduler_utils::rotateLoop(mma_result, 2, {acr, bcr});
   }
 }
 

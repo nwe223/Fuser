@@ -318,7 +318,7 @@ std::string checkMatmulType(Fusion* fusion, const MmaOp* mma_expr) {
   const auto& fusion_inputs = fusion->inputs();
   const auto& fusion_outputs = fusion->outputs();
   const auto& mma_inputs = mma_expr->inputs();
-  const auto& mma_outputs = mma_expr->outputs();
+  const auto mma_output = mma_expr->outputs().front();
 
   const auto fusion_inputs_tvs =
       ir_utils::filterByType<TensorView>(fusion_inputs).vector();
@@ -334,7 +334,7 @@ std::string checkMatmulType(Fusion* fusion, const MmaOp* mma_expr) {
       "The type used to define the number of dimension in input and output TV must be the same.");
 
   constexpr DimSizeType expected_gemm_dims = static_cast<DimSizeType>(2);
-  constexpr size_t expected_number_of_inputs = 2;
+  constexpr size_t minimal_number_of_inputs = 2;
   constexpr size_t expected_number_of_outputs = 1;
 
   // Quick checks - MmaOp
@@ -351,12 +351,12 @@ std::string checkMatmulType(Fusion* fusion, const MmaOp* mma_expr) {
 
   // Quick checks - Fusion
   {
-    // Fusion can only have two TV inputs
-    if (fusion_inputs.size() != fusion_inputs_tvs.size()) {
+    // Fusion should contain at least two inputs (for now)
+    if (minimal_number_of_inputs > fusion_inputs.size()) {
       return "Fusion inputs contain at least one non-TensorView object";
     }
-    if (expected_number_of_inputs != fusion_inputs.size()) {
-      return "Fusion inputs contain at least one non-TensorView object";
+    if (minimal_number_of_inputs != fusion_inputs_tvs.size()) {
+      return "Fusion inputs must contain two TensorView objects";
     }
 
     // Fusion has only TVs as outputs, and we expect only one object in the list
@@ -387,8 +387,10 @@ std::string checkMatmulType(Fusion* fusion, const MmaOp* mma_expr) {
       if (tv->hasBroadcast()) {
         return "Fusion output TV has broadcast domain";
       }
-      if (!tv->hasReduction()) {
-        return "Fusion output TV has no reduction domain";
+      if (tv->sameAs(mma_output)) {
+        if (!tv->hasReduction()) {
+          return "Fusion output TV has no reduction domain";
+        }
       }
       const auto result = TensorDomain::noReductions(
                               TensorDomain::noBroadcasts(tv->getLeafDomain()))
@@ -418,11 +420,6 @@ std::string checkMatmulType(Fusion* fusion, const MmaOp* mma_expr) {
       if (!areMmaOpInputDependeciesValid(mma_in)) {
         return "MmaOp input has unsupported dependency";
       }
-    }
-
-    // MmaOp output must be a fusion output
-    if (!mma_outputs.front()->isFusionOutput()) {
-      return "Mma op output does not belong to fusion outputs";
     }
   }
 
