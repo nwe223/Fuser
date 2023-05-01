@@ -8281,7 +8281,7 @@ TEST_F(NVFuserTest, FusionContigStrideOrder_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({3, 6, 7}, options).transpose(-1, -2);
-  at::Tensor t1 = at::randn({1, 6, 7}, options).transpose(-1, -2);
+  at::Tensor t1 = at::randn({1, 7, 6}, options)
 
   auto tv0 = TensorViewBuilder()
                  .ndims(3)
@@ -8291,13 +8291,14 @@ TEST_F(NVFuserTest, FusionContigStrideOrder_CUDA) {
                  .build();
   auto tv1 = TensorViewBuilder()
                  .ndims(3)
-                 .contiguity({c10::nullopt, false, false})
+                 .contiguity({c10::nullopt, true, true})
                  .shape({1, -1, -1})
                  .dtype(DataType::Float)
                  .build();
 
   fusion->addInput(tv0);
-  fusion->addInput(tv1);
+  auto transposed_tv1 = transpose(tv1, -1, -2);
+  fusion->addInput(transposed_tv1);
 
   auto tv2 = add(tv0, tv1);
 
@@ -8308,7 +8309,7 @@ TEST_F(NVFuserTest, FusionContigStrideOrder_CUDA) {
   FusionExecutorCache executor_cache(std::move(fusion));
   auto cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
 
-  auto t2 = t0 + t1;
+  auto t2 = t0 + t1.transpose(-1, -2);
 
   testValidate(
       executor_cache.fusion(), cg_outputs, {t0, t1}, {t2}, __LINE__, __FILE__);
