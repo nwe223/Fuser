@@ -8285,7 +8285,7 @@ TEST_F(NVFuserTest, FusionContigStrideOrder_CUDA) {
 
   auto tv0 = TensorViewBuilder()
                  .ndims(3)
-                 .contiguity({false, false, false}) // ttfff
+                 .contiguity({true, true, true}) // ttt
                  .shape({-1, -1, -1})
                  .dtype(DataType::Float)
                  .build();
@@ -8297,12 +8297,16 @@ TEST_F(NVFuserTest, FusionContigStrideOrder_CUDA) {
                  .build();
 
   fusion->addInput(tv0);
+  fusion->setPermutationOnInput(0, {0, 2, 1});
+  auto transposed_tv0 = transpose(tv0, -1, -2);
   fusion->addInput(tv1);
   auto transposed_tv1 = transpose(tv1, -1, -2);
 
-  auto tv2 = add(tv0, transposed_tv1);
+  auto tv2 = add(transposed_tv0, transposed_tv1);
+  auto transposed_tv2 = transpose(tv2, 0, 2);
 
-  fusion->addOutput(tv2);
+  fusion->addOutput(transposed_tv2);
+  fusion->setPermutationOnOutput(0, {2, 1, 0});
 
   std::vector<c10::IValue> aten_inputs({t0, t1});
 
