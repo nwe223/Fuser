@@ -8281,7 +8281,7 @@ TEST_F(NVFuserTest, FusionContigStrideOrder_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({3, 6, 7}, options).transpose(-1, -2);
-  at::Tensor t1 = at::randn({1, 7, 6}, options)
+  at::Tensor t1 = at::randn({1, 6, 7}, options);
 
   auto tv0 = TensorViewBuilder()
                  .ndims(3)
@@ -8297,10 +8297,10 @@ TEST_F(NVFuserTest, FusionContigStrideOrder_CUDA) {
                  .build();
 
   fusion->addInput(tv0);
+  fusion->addInput(tv1);
   auto transposed_tv1 = transpose(tv1, -1, -2);
-  fusion->addInput(transposed_tv1);
 
-  auto tv2 = add(tv0, tv1);
+  auto tv2 = add(tv0, transposed_tv1);
 
   fusion->addOutput(tv2);
 
