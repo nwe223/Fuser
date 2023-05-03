@@ -14,7 +14,7 @@
 // NOTE: included to avoid compilation error caused by missing destructor in
 // 'SchedulerRuntimeInfo'
 #include <executor_utils.h>
-
+#include <ops/all_ops.h>
 namespace nvfuser {
 using MmaLayout = MmaOptions::MmaLayout;
 namespace {
@@ -439,21 +439,19 @@ void scheduleProlog(TensorView* shared_mem_tv, const MatmulParams& params) {
 } // namespace
 
 namespace {
-int getKAxis(const MmaLayout& layout) {
-  switch (layout) {
-    //! NT : K,M x K,N -> K,M,N
-    case MmaLayout::NT:
-      return 0;
-    //! TT : M,K X K,N -> M,K,N
-    case MmaLayout::TT:
-      return 1;
-    //! TN : M,K X N,K -> M,N,K
-    case MmaLayout::TN:
-      return 2;
-    default:
-      TORCH_CHECK(false, "unsupported data layout.");
+
+void replaceWith(TensorView* old_tv, TensorView* new_tv){
+  // before: t0 -> old_tv -> t1
+  // after: t0 -> new_tv -> t1  
+  // replace definition of this to definition of new_tv
+  ir_utils::replaceValInExpr(old_tv->definition(), old_tv, new_tv);
+
+  // replace all use of this with new_tv
+  for (auto expr : old_tv->fusion()->unordered_uses(old_tv)) {
+    ir_utils::replaceValInExpr(expr, old_tv, new_tv);
   }
 }
+
 void scheduleSplitKReduction(
     TensorView* tv,
     const MmaLayout& layout,
@@ -523,7 +521,7 @@ void scheduleSplitKReduction(
 
   // step-5, set vectorize, after NN branch, the root domain
   // is always [M, N, K], reduction over K
-  const bool vectoriziable = getKAxis(layout) == 2;
+  const bool vectoriziable = false;
   const int max_vectorization_factor =
       16 / dataTypeSize(tv->getDataType().value());
   const int vectorization_factor = vectoriziable
@@ -769,10 +767,9 @@ void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
 
   // mma_result -> tmp_gmem[g] -> tmp_gmem_reload -> cc -> c
   TensorView* mma_result = cc; // mma results
-  TensorView* tmp_gmem = nullptr; // output
-  TensorView* tmp_gmem_reload = nullptr;
+  TensorView* transposed = nullptr; // output
+  TensorView* reverse_transpose = nullptr;
   if (params.split_k_factor > 1) {
-    std::cout << "cc= " << cc->toString() << std::endl;
     // mma_result -> tmp_gmem[g] -> tmp_gmem_reload -> cc -> c[output]
     // id=  0   1   2   3   4   5   6   7   8   9  10 11   12   13
     // cc= [Moo Moi Noo Noi SKo SKi Kw  Mwo Nwo Mw Nw Mist Nist Kist]
@@ -788,10 +785,21 @@ void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
     // 9 Mist = instruction_tile_m
     // 10 Nist = instruction_tile_n
     // 11 Kist = instruction_tile_k
-    tmp_gmem = cc->rFactor({5, 6, 13});
+
+    auto tmp_gmem = cc->rFactor({5, 6, 13});
     mma_result = tmp_gmem->cacheBefore();
-    tmp_gmem->setMemoryType(MemoryType::Global);
-    tmp_gmem_reload = tmp_gmem->cacheAfter();
+    transposed = permute(tmp_gmem, {2,0,1});
+    // mma_result -> tmp_gmem --> cc
+    replaceWith(tmp_gmem, transposed);
+    // mma_result -> transposed -> cc
+    transposed->setMemoryType(MemoryType::Global);
+    // mma_result -> transposed[g] -> cc
+    auto transposed_reload = transposed->cacheAfter();
+    // mma_result -> transposed[g] -> transposed_reload -> cc 
+    // transpose again, so cc is good
+    reverse_transpose = permute(transposed_reload, {1,2,0});
+    replaceWith(transposed_reload, reverse_transpose);
+    // mma_result -> transposed[g] -> reverse_transpose -> cc 
 
     mma_builder.accumulatorTv(mma_result);
     // Propagate warp tile to main loop
@@ -886,7 +894,7 @@ void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
     scheduler_utils::BoundedDirectionalTransformPropagator::forward(
         mma_result,
         -1,
-        {tmp_gmem},
+        {transposed},
         scheduler_utils::BoundedDirectionalTransformPropagator::Options()
             .propagateParallelType()
             .propagateToBoundary());
@@ -902,9 +910,9 @@ void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
     scheduleSplitKReduction(cc, layout, gemm_tile, params);
 
     // allows propagte to tmp_gmem_reload but can't propage from tmp_gmem_reload
-    reduction_scheduler_utils::propagateTransformation(cc, {tmp_gmem_reload});
+    reduction_scheduler_utils::propagateTransformation(cc, {reverse_transpose});
 
-    scheduler_utils::parallelizeAllLike(cc, {tmp_gmem_reload, c});
+    scheduler_utils::parallelizeAllLike(cc, {reverse_transpose, c});
     cc->axis(-1)->parallelize(ParallelType::Serial);
 
   } else {

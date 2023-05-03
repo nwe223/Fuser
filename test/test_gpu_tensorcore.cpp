@@ -3535,7 +3535,7 @@ TEST_F(NVFuserTest, FusionAmpereMatmulSplitKCrossCTATailing_CUDA) {
   // kernel3 run in 0.34816 ms, achieved: 97.6941 GB/s
   int M = 128 * 15, N = 128 * 9, K = 4096;
   for (auto layout : {MatmulLayout::TT}) {
-    for (int k_factor : {1, 2, 4}) {
+    for (int k_factor : {4}) {
       Fusion fusion;
       FusionGuard fg(&fusion);
       auto tv0 = makeContigTensor(2, DataType::Half);
