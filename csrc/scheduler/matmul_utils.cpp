@@ -28,6 +28,8 @@
 #include "type.h"
 #include "utils.h"
 
+#include <dlfcn.h>
+
 namespace nvfuser {
 namespace {
 
@@ -104,6 +106,129 @@ inline std::optional<MmaOptions::MacroType> getMmaOp(
       break;
   }
   return std::nullopt;
+}
+
+inline std::optional<MmaOptions::MacroType> getMmaOp(
+    const int dev_version,
+    const GemmTile& instruction_tile) {
+  using MacroType = MmaOptions::MacroType;
+
+  switch (dev_version) {
+    case 70:
+      if (instruction_tile == GemmTile{16, 16, 4})
+        return MacroType::Volta_16_16_4;
+      break;
+    case 75:
+      if (instruction_tile == GemmTile{16, 8, 16})
+        return MacroType::Turing_16_8_16;
+      if (instruction_tile == GemmTile{16, 16, 16})
+        return MacroType::Turing_16_16_16;
+      break;
+    case 80:
+    case 86:
+    case 89:
+      if (instruction_tile == GemmTile{16, 8, 16})
+        return MacroType::Ampere_16_8_16;
+      if (instruction_tile == GemmTile{16, 16, 16})
+        return MacroType::Ampere_16_16_16;
+      break;
+    default:
+      break;
+  }
+  return std::nullopt;
+}
+
+typedef int (*get_hss_heuristics_t)(
+    int isColMajor,
+    long unsigned M,
+    long unsigned N,
+    long unsigned K,
+    int transA,
+    int transB,
+    int align,
+    int major,
+    int minor,
+    int numCTAs,
+    int smemAvailable,
+    int workspaceSize,
+    int* cta,
+    int* warp,
+    int* instr,
+    int* splitK,
+    int* gridSwizzle,
+    int* ctaOrder,
+    int* loadStages);
+
+get_hss_heuristics_t getExternalHeuristicsPtr() {
+  static void* hss_heuristics_ptr = []() -> void* {
+    auto lib_ptr = dlopen("libheuristics.so", RTLD_NOW);
+    if (!lib_ptr) {
+      return nullptr;
+    }
+    return dlsym(lib_ptr, "get_hss_heuristics");
+  }();
+  return reinterpret_cast<get_hss_heuristics_t>(hss_heuristics_ptr);
+}
+
+inline bool fromExternalHeuristic(
+    std::shared_ptr<MatmulParams> params,
+    const ProblemShape& problem_shape,
+    const MatmulLayout matmul_layout,
+    const cudaDeviceProp* prop) {
+  auto get_hss_heuristics = getExternalHeuristicsPtr();
+  if (!get_hss_heuristics)
+    return false;
+
+  GemmTile warp_tile{0, 0, 0}, cta_tile{0, 0, 0}, instruction_tile{0, 0, 0};
+
+  int splitK, gridSwizzle, ctaOrder, loadStages;
+
+  bool transA =
+      matmul_layout == MatmulLayout::TT || matmul_layout == MatmulLayout::TN;
+  bool transB =
+      matmul_layout == MatmulLayout::TT || matmul_layout == MatmulLayout::NT;
+  bool isColMajor = true;
+
+  // fp16 and bfloat16
+  get_hss_heuristics(
+      isColMajor,
+      problem_shape[0],
+      problem_shape[1],
+      problem_shape[2],
+      transA,
+      transB,
+      8 /* Alignment */,
+      prop->major,
+      prop->minor,
+      prop->multiProcessorCount,
+      prop->sharedMemPerBlockOptin /* Max possible amount of smem */,
+      0 /* Workspace size */,
+      reinterpret_cast<int*>(&cta_tile),
+      reinterpret_cast<int*>(&warp_tile),
+      reinterpret_cast<int*>(&instruction_tile),
+      &splitK,
+      &gridSwizzle,
+      &ctaOrder,
+      &loadStages);
+
+  MatmulParams::DoubleBufferOptions doubleBuffer;
+  doubleBuffer.double_buffer_smem_write = loadStages > 1;
+  doubleBuffer.double_buffer_smem_read = loadStages > 1;
+  doubleBuffer.smem_double_buffer_stage = loadStages;
+  params->async_gmem_load_operands = loadStages > 1;
+  params->double_buffer_options = doubleBuffer;
+
+  params->grid_swizzle_factor = gridSwizzle;
+  params->cta_order =
+      static_cast<MatmulParams::TileRasterizationOrder>(ctaOrder);
+  params->tile_sizes = {cta_tile, warp_tile, instruction_tile};
+
+  auto macro = getMmaOp(prop->major * 10 + prop->minor, instruction_tile);
+  if (!macro) {
+    return false;
+  }
+  params->mma_macro = *macro;
+  return true;
 }
 
 //! A wrapper for core heuristics initialization
@@ -492,6 +617,8 @@ std::shared_ptr<MatmulParams> getMatmulHeuristics(
   TORCH_INTERNAL_ASSERT(
       mma_exprs.size() == 1, "Support only fusion with a single mma op.");
 
+  // TODO fix. This is now wrong bc for turing+ now MmaOps are always TN. See
+  // matmulTuringOrLater
   const auto layout = mma_exprs.front()->layout();
   TORCH_INTERNAL_ASSERT(layout.has_value(), "Failed to acquire inputs layout.");
 
@@ -501,20 +628,28 @@ std::shared_ptr<MatmulParams> getMatmulHeuristics(
       problem_shape.has_value(), "Failed to acquire problem shape.");
 
   const auto device_prop = at::cuda::getCurrentDeviceProperties();
-  const auto mma_op = getMmaOp(
-      device_prop->major * 10 + device_prop->minor, problem_shape.value());
-  TORCH_INTERNAL_ASSERT(
-      mma_op.has_value(), "Can not determine MMA op for problem.");
 
   // Populate heuristic details
-  auto status =
-      initCoreHeuristics(params, mma_op.value(), problem_shape.value());
-  TORCH_INTERNAL_ASSERT(
-      status, "Core part of heuristics failed to initialize.");
+  if (getExternalHeuristicsPtr()) {
+    auto status = fromExternalHeuristic(
+        params, problem_shape.value(), layout.value(), device_prop);
+    TORCH_INTERNAL_ASSERT(
+        status, "Using external heuristics failed to initialize.");
+  } else {
+    const auto mma_op = getMmaOp(
+        device_prop->major * 10 + device_prop->minor, problem_shape.value());
+    TORCH_INTERNAL_ASSERT(
+        mma_op.has_value(), "Can not determine MMA op for problem.");
 
-  status = initExtraHeuristics(params, problem_shape.value());
-  TORCH_INTERNAL_ASSERT(
-      status, "Additional part of heuristics failed to initialize.");
+    auto status =
+        initCoreHeuristics(params, mma_op.value(), problem_shape.value());
+    TORCH_INTERNAL_ASSERT(
+        status, "Core part of heuristics failed to initialize.");
+
+    status = initExtraHeuristics(params, problem_shape.value());
+    TORCH_INTERNAL_ASSERT(
+        status, "Additional part of heuristics failed to initialize.");
+  }
 
   // Set kernel index mode
   params->cparams.index_type = runtime_info.getIndexType();
