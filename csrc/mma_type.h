@@ -118,7 +118,8 @@ struct MmaOptions {
   MmaOp* mmaOp() const;
 };
 
-static inline std::pair<bool, bool> MmaLayoutToBool(MmaOptions::MmaLayout matmul_layout) {
+static inline std::pair<bool, bool> MmaLayoutToBool(
+    MmaOptions::MmaLayout matmul_layout) {
   bool transA = matmul_layout == MmaOptions::MmaLayout::TT ||
       matmul_layout == MmaOptions::MmaLayout::TN;
   bool transB = matmul_layout == MmaOptions::MmaLayout::TT ||
@@ -126,7 +127,9 @@ static inline std::pair<bool, bool> MmaLayoutToBool(MmaOptions::MmaLayout matmul
   return {transA, transB};
 }
 
-static inline MmaOptions::MmaLayout MmaLayoutFromBool(bool transA, bool transB) {
+static inline MmaOptions::MmaLayout MmaLayoutFromBool(
+    bool transA,
+    bool transB) {
   if (transA && transB) {
     return MmaOptions::MmaLayout::TT;
   } else if (transA) {
