@@ -28,7 +28,9 @@
 #include "type.h"
 #include "utils.h"
 
+#ifdef __linux__
 #include <dlfcn.h>
+#endif
 
 namespace nvfuser {
 namespace {
@@ -179,6 +181,7 @@ typedef int (*get_hss_heuristics_t)(
     int* loadStages);
 
 get_hss_heuristics_t getExternalHeuristicsPtr() {
+#ifdef __linux__
   static void* hss_heuristics_ptr = []() -> void* {
     auto lib_ptr = dlopen("libheuristics.so", RTLD_NOW);
     if (!lib_ptr) {
@@ -187,6 +190,9 @@ get_hss_heuristics_t getExternalHeuristicsPtr() {
     return dlsym(lib_ptr, "get_hss_heuristics");
   }();
   return reinterpret_cast<get_hss_heuristics_t>(hss_heuristics_ptr);
+#else
+  return nullptr;
+#endif
 }
 
 inline bool fromExternalHeuristic(
