@@ -72,6 +72,25 @@ std::deque<std::deque<Val*>> getAllDepndencyChains(
   return all_paths;
 }
 
+template <typename Expr_t>
+std::deque<Expr_t*> getAllFilteredExprsBetween(
+    const std::vector<nvfuser::Val*>& producers,
+    const Val* consumer) {
+  std::unordered_set<nvfuser::Val*> producers_set(
+      producers.begin(), producers.end());
+
+  auto exprs = DependencyCheck::getAllExprsBetween(
+      producers_set, {const_cast<Val*>(consumer)});
+
+  std::deque<Expr_t*> out;
+  for (auto expr : exprs) {
+    if (expr->isA<Expr_t>()) {
+      out.emplace_back(expr->as<Expr_t>());
+    }
+  }
+  return out;
+}
+
 //! A wrapper for printing debug details.
 void printMsg(const std::string& msg) {
   std::cout << msg << std::endl;
@@ -306,6 +325,29 @@ inline bool initExtraHeuristics(
   params->double_buffer_options.smem_double_buffer_stage = stages;
 
   return true;
+}
+
+MatmulLayout inferLayout(Fusion* fusion, const MmaOp* mma_expr) {
+  const auto& mma_inputs = mma_expr->inputs();
+  TORCH_INTERNAL_ASSERT(mma_expr->layout(), "Failed to acquire inputs layout.");
+  const MatmulLayout matmul_layout = *mma_expr->layout();
+  auto [transA, transB] = MmaLayoutToBool(matmul_layout);
+  auto loadsA =
+      getAllFilteredExprsBetween<LoadStoreOp>(fusion->inputs(), mma_inputs[0]);
+  for (auto load : loadsA) {
+    if (load->hasTranspose()) {
+      transA = !transA;
+    }
+  }
+
+  auto loadsB =
+      getAllFilteredExprsBetween<LoadStoreOp>(fusion->inputs(), mma_inputs[1]);
+  for (auto load : loadsB) {
+    if (load->hasTranspose()) {
+      transB = !transB;
+    }
+  }
+  return MmaLayoutFromBool(transA, transB);
 }
 
 //! A helper for getting problem shape from fusion and runtime info. Operation
@@ -632,7 +674,10 @@ std::shared_ptr<MatmulParams> getMatmulHeuristics(
   // Populate heuristic details
   if (getExternalHeuristicsPtr()) {
     auto status = fromExternalHeuristic(
-        params, problem_shape.value(), layout.value(), device_prop);
+        params,
+        problem_shape.value(),
+        inferLayout(fusion, mma_exprs.front()->as<MmaOp>()),
+        device_prop);
     TORCH_INTERNAL_ASSERT(
         status, "Using external heuristics failed to initialize.");
   } else {

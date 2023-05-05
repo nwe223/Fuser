@@ -118,7 +118,28 @@ struct MmaOptions {
   MmaOp* mmaOp() const;
 };
 
+static inline std::pair<bool, bool> MmaLayoutToBool(MmaOptions::MmaLayout matmul_layout) {
+  bool transA = matmul_layout == MmaOptions::MmaLayout::TT ||
+      matmul_layout == MmaOptions::MmaLayout::TN;
+  bool transB = matmul_layout == MmaOptions::MmaLayout::TT ||
+      matmul_layout == MmaOptions::MmaLayout::NT;
+  return {transA, transB};
+}
+
+static inline MmaOptions::MmaLayout MmaLayoutFromBool(bool transA, bool transB) {
+  if (transA && transB) {
+    return MmaOptions::MmaLayout::TT;
+  } else if (transA) {
+    return MmaOptions::MmaLayout::TN;
+  } else if (transB) {
+    return MmaOptions::MmaLayout::NT;
+  } else {
+    return MmaOptions::MmaLayout::NN;
+  }
+}
+
 //! User interface for configuring the mma and mma related
+
 //!  operators by specifying the mma instruction tile type
 //!  input data layout, and the operand position of a tensor.
 class TORCH_CUDA_CU_API MmaBuilder {
