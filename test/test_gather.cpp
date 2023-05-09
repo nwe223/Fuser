@@ -1192,7 +1192,7 @@ TEST_F(IndexingOpTest, TakeAlongAxisIntermediateTensorTranspose3_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {ref}, __LINE__, __FILE__);
 }
 
-TEST_F(IndexingOpTest, TakeAlongAxisCrossEntropyLoss_CUDA) {
+TEST_F(IndexingOpTest, TakeAlongAxisCrossEntropyLossNoDivision_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);
@@ -1205,14 +1205,15 @@ TEST_F(IndexingOpTest, TakeAlongAxisCrossEntropyLoss_CUDA) {
   auto tv3 = broadcast(tv2, {false, true});
   auto tv4 =
       expand(tv3, {IrBuilder::create<Int>(128), IrBuilder::create<Int>(371)});
-  auto tv5 = sub(tv0, tv4);
+  auto tv5 = sub(tv0, tv4); // input_prime
   auto tv6 = exp(tv5);
   auto tv7 = sum(tv6, {1});
   auto tv8 = broadcast(tv7, {false, true});
   auto tv9 =
-      expand(tv8, {IrBuilder::create<Int>(128), IrBuilder::create<Int>(371)});
-  auto tv10 = div(tv6, tv9);
-  auto tv11 = log(tv10);
+      expand(tv8, {IrBuilder::create<Int>(128), IrBuilder::create<Int>(371)}); // sumexp
+  // auto tv10 = div(tv6, tv9);
+  // auto tv11 = log(tv10);
+  auto tv11 = sub(tv5, log(tv9));
   auto tv12 = neg(tv11);
   auto tv13 = reshape(tv1, {128}, {128, 1});
   auto tv14 = take_along_axis(tv12, tv13, 1);
