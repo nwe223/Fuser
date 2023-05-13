@@ -503,13 +503,12 @@ void initNvFuserPythonBindings(PyObject* module) {
   fusion_def.def(
       "define_vector",
       [](FusionDefinition& self,
-         int64_t size,
+         size_t size,
          PrimDataType dtype = DataType::Int) -> Vector {
         FUSER_PERF_SCOPE("FusionDefinition.define_vector (input_specific)");
         TORCH_CHECK(
             !self.completed(), "Attempting to add to a completed definition!");
-        Vector out = self.defineVector();
-        std::vector<nullptr_t> value(size, nullptr);
+        Vector out = self.defineVector(size);
         self.defineRecord(new VectorRecord<std::int64_t>(
             {self.recordingState(out())},
             serde::RecordType_VectorInput,
@@ -530,16 +529,16 @@ void initNvFuserPythonBindings(PyObject* module) {
       "define_vector",                                                  \
       [](FusionDefinition& self,                                        \
          std::optional<std::vector<CType>> value,                       \
-         int64_t size,                                                  \
+         size_t size,                                                   \
          PrimDataType dtype) -> Vector {                                \
         FUSER_PERF_SCOPE("FusionDefinition.define_vector (canonical)"); \
         TORCH_CHECK(size > 0, "Vector size should be >0.");             \
         if (value.has_value()) {                                        \
           TORCH_CHECK(                                                  \
-              value.value().size() == static_cast<size_t>(size),        \
+              value.value().size() == size,                             \
               "value size and input size do not  match!");              \
         }                                                               \
-        Vector out = self.defineVector();                               \
+        Vector out = self.defineVector(size);                           \
         auto rtype = value.has_value()                                  \
             ? serde::mapToSerdeVectorRecordType(Nvfuser_DType)          \
             : serde::RecordType_VectorInput;                            \
@@ -564,7 +563,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          std::vector<CType> value,                                     \
          PrimDataType dtype) -> Vector {                               \
         FUSER_PERF_SCOPE("FusionDefinition.define_vector (constant)"); \
-        Vector out = self.defineVector();                              \
+        Vector out = self.defineVector(value.size());                  \
         self.defineRecord(new VectorRecord<CType>(                     \
             {self.recordingState(out())},                              \
             serde::mapToSerdeScalarRecordType(Nvfuser_DType),          \
@@ -1710,22 +1709,21 @@ void initNvFuserPythonBindings(PyObject* module) {
       "broadcast_in_dim",
       [](FusionDefinition::Operators& self,
          Tensor arg,
-         std::vector<int64_t>& output_shape,
+         Vector output_shape,
          std::vector<int64_t>& broadcast_dims) -> Tensor {
         FUSER_PERF_SCOPE("Operators.broadcast_in_dim");
         FusionDefinition* fd = self.fusion_definition;
         TORCH_CHECK(
             self.validUse(), "Attempting to add to a completed definition!");
         TORCH_CHECK(
-            output_shape.size() >= broadcast_dims.size(),
+            output_shape.size >= broadcast_dims.size(),
             "broadcast_dims vector size is too big for output shape!");
-        Tensor output = fd->defineTensor(output_shape.size());
+        Tensor output = fd->defineTensor(output_shape.size);
         fd->defineRecord(new BroadcastInDimOpRecord<int64_t>(
-            {fd->recordingState(arg())},
+            {fd->recordingState(arg()), fd->recordingState(output_shape())},
             {fd->recordingState(output())},
             "ops.broadcast_in_dim",
             serde::RecordType_BroadcastInDim,
-            std::move(output_shape),
             std::move(broadcast_dims)));
         return output;
       },
@@ -2111,9 +2109,9 @@ void initNvFuserPythonBindings(PyObject* module) {
 
   auto shape_def = [](Tensor arg) {
     auto fd = arg.fusion_definition;
-    Vector output = fd->defineVector();
-    fd->defineRecord(
-        new ShapeRecord({fd->recordingState(arg())}, {fd->recordingState(output())}));
+    Vector output = fd->defineVector(arg.dims);
+    fd->defineRecord(new ShapeRecord(
+        {fd->recordingState(arg())}, {fd->recordingState(output())}));
     return output;
   };
 

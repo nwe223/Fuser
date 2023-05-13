@@ -712,40 +712,29 @@ struct BroadcastInDimOpRecord : RecordFunctor {
       std::vector<State> _outputs,
       std::string _name,
       serde::RecordType record_type,
-      std::vector<OutputShapeType> output_shape,
       std::vector<int64_t> broadcast_dims)
       : RecordFunctor(
             std::move(_args),
             std::move(_outputs),
             _name,
             record_type),
-        output_shape_(std::move(output_shape)),
         broadcast_dims_(std::move(broadcast_dims)) {}
   virtual ~BroadcastInDimOpRecord() = default;
   virtual RecordFunctor* clone() final {
     return new BroadcastInDimOpRecord(*this);
   }
 
-  inline size_t outputShapeHash(
-      const std::vector<OutputShapeType>& shape) const;
-
   //! Child specific hash function in lower 32 bits.
-  //! | 31 -------------- 16 | 15 --------------  0 |
-  //! | broadcast_dims hash  | output_shape hash    |
-  //!
-  //! The output_shape hash is specialized in 2 ways using the method
-  //! outputShapeHash:
-  //! 1. int64_t - hashes dimension sizes.
-  //! 2. State - hashes number of dimensions
+  //! | 31 -------------------------------------  0 |
+  //! | broadcast_dims hash                         |
   virtual size_t hash() const final {
     auto result = RecordFunctor::hash();
     size_t broadcast_dims_hash = 0;
     for (auto dim : broadcast_dims_) {
-      broadcast_dims_hash |= 1 << ((output_shape_.size() - 1) - dim);
+      broadcast_dims_hash |= 1 << ((args.at(1).size - 1) - dim);
     }
-    broadcast_dims_hash = (broadcast_dims_hash & 0xffff) << 16;
-    return result | broadcast_dims_hash |
-        (outputShapeHash(output_shape_) & 0xffff);
+    broadcast_dims_hash = broadcast_dims_hash & 0xffffffff;
+    return result | broadcast_dims_hash;
   }
 
   virtual bool operator==(const RecordFunctor& other) const final {
@@ -753,17 +742,7 @@ struct BroadcastInDimOpRecord : RecordFunctor {
     if (auto child_ptr = dynamic_cast<const BroadcastInDimOpRecord*>(&other)) {
       result = RecordFunctor::operator==(other);
       if (result) {
-        result =
-            ((output_shape_.size() == child_ptr->output_shape_.size()) &&
-             (broadcast_dims_.size() == child_ptr->broadcast_dims_.size()));
-        if (result) {
-          for (size_t i = 0; i < output_shape_.size(); ++i) {
-            if (output_shape_[i] != child_ptr->output_shape_[i]) {
-              result = false;
-              break;
-            }
-          }
-        }
+        result = (broadcast_dims_.size() == child_ptr->broadcast_dims_.size());
         if (result) {
           for (size_t i = 0; i < broadcast_dims_.size(); ++i) {
             if (broadcast_dims_[i] != child_ptr->broadcast_dims_[i]) {
@@ -831,17 +810,6 @@ struct BroadcastInDimOpRecord : RecordFunctor {
 
   void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
-    os << ", output_shape=[";
-    bool first_arg = true;
-    for (auto shape : output_shape_) {
-      if (first_arg) {
-        first_arg = false;
-      } else {
-        os << ", ";
-      }
-      os << shape;
-    }
-    os << "]";
     os << ", broadcast_dims=[";
     first_arg = true;
     for (auto dim : broadcast_dims_) {
@@ -869,31 +837,11 @@ struct BroadcastInDimOpRecord : RecordFunctor {
       const std::vector<OutputShapeType>& shape) const;
 
  private:
-  //! Represents the tensor dimensions of the output tensor.
-  std::vector<OutputShapeType> output_shape_;
   //! Communicates which dimensions of the output the input tensor maps.
   //! For instance, for output [2, 3, 4] and input [3]. This vector would
   //! contain [1].
   std::vector<int64_t> broadcast_dims_;
 };
-
-//! ouputShapeHash Specializations used by hash()
-
-template <>
-inline size_t BroadcastInDimOpRecord<int64_t>::outputShapeHash(
-    const std::vector<int64_t>& shape) const {
-  size_t shape_hash = 0;
-  for (auto size : shape) {
-    shape_hash ^= static_cast<size_t>(size);
-  }
-  return shape_hash;
-}
-
-template <>
-inline size_t BroadcastInDimOpRecord<State>::outputShapeHash(
-    const std::vector<State>& shape) const {
-  return shape.size();
-}
 
 //! expandShape Specializations used by operator()
 
@@ -2529,7 +2477,7 @@ struct ShapeRecord : RecordFunctor {
   void operator()(FusionState& fd) final {
     auto arg = fd.getFusionState(args_.at(0).index)->as<TensorView>();
     auto result = shape(arg);
-    fd.setFusionState(outputs_.at(0).index, result); 
+    fd.setFusionState(outputs_.at(0).index, result);
   }
 };
 
