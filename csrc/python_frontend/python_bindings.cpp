@@ -142,9 +142,12 @@ void initNvFuserPythonBindings(PyObject* module) {
     return self.fusion_definition;
   });
 
-  auto tensor_sizes = [](Tensor arg) -> std::vector<Scalar> {
-    FUSER_PERF_SCOPE("Operators.tensor_sizes");
+  auto shape = [](Tensor arg) -> Vector {
+    FUSER_PERF_SCOPE("Operators.shape");
     auto fd = arg.fusion_definition;
+    TORCH_CHECK(
+        !fd.completed(),
+        "Attempting to add to a completed definition!");
     std::vector<Scalar> outputs;
     std::vector<State> output_state;
     for (const auto idx : c10::irange(arg.dims)) {

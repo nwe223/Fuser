@@ -1436,15 +1436,34 @@ TensorView* expand_as(TensorView* inp, TensorView* other) {
   return out_tensor;
 }
 
-std::vector<Val*> tensor_sizes(TensorView* inp) {
+std::vector<Val*> shape(TensorView* inp) {
   auto iter_domains = TensorDomain::noReductions(inp->getMaybeRFactorDomain());
-  std::vector<Val*> sizes(iter_domains.size(), nullptr);
+  std::vector<Val*> shape(iter_domains.size(), nullptr);
 
   for (auto idx : c10::irange(iter_domains.size())) {
-    sizes[idx] = iter_domains[idx]->getMaybeExpandedExtent();
+    shape[idx] = iter_domains[idx]->getMaybeExpandedExtent();
   }
 
-  return sizes;
+  return shape;
+}
+
+Val* size(TensorView* inp, int64_t dim) {
+  auto iter_domains = TensorDomain::noReductions(inp->getMaybeRFactorDomain());
+  auto idx = dim;
+  if (dim < 0) {
+    dim = iter_domains.size() + dim;
+  }
+  TORCH_CHECK((idx >= 0) && (static_cast<size_t>(idx) < iter_domains.size()), "The dimension requested is beyond the bounds of the shape of the indexed tensor!");
+  return iter_domains.at(idx)->getMaybeExpandedExtent();
+}
+
+Val* size(std::vector<Val*>& inp, int64_t dim) {
+  auto idx = dim;
+  if (dim < 0) {
+    dim = inp.size() + dim;
+  }
+  TORCH_CHECK((idx >= 0) && (static_cast<size_t>(idx) < inp.size()), "The dimension requested is beyond the bounds of the indexed vector!");
+  return inp.at(idx);
 }
 
 WelfordResult WelfordRaw(
