@@ -1196,9 +1196,6 @@ struct CatOpRecord : RecordFunctor {
       }
       os << output;
     }
-    if (always_returns_tuple_) {
-      os << ",";
-    }
     if (outputs_.size() > 0) {
       os << " = "
          << "fd." << name_ << "(";
@@ -2506,26 +2503,24 @@ struct BatchNormOpRecord : RecordFunctor {
   bool channels_last_;
 };
 
-//! Specialized Record Functor for the FusionState's tensor_size op.
+//! Specialized Record Functor for the shape op.
 //! Uses the default hash() and print() methods of Record Functor
 
-struct TensorSizesRecord : RecordFunctor {
-  TensorSizesRecord(std::vector<State> args, std::vector<State> outputs)
+struct ShapeRecord : RecordFunctor {
+  ShapeRecord(std::vector<State> args, std::vector<State> outputs)
       : RecordFunctor(
             std::move(args),
             std::move(outputs),
-            "ops.tensor_sizes",
-            serde::RecordType_TensorSizes) {
-    always_returns_tuple_ = true;
-  }
-  virtual ~TensorSizesRecord() = default;
+            "ops.shape",
+            serde::RecordType_Shape) {}
+  virtual ~ShapeRecord() = default;
   virtual RecordFunctor* clone() final {
-    return new TensorSizesRecord(*this);
+    return new ShapeRecord(*this);
   }
 
   virtual bool operator==(const RecordFunctor& other) const final {
     auto result = false;
-    if (dynamic_cast<const TensorSizesRecord*>(&other)) {
+    if (dynamic_cast<const ShapeRecord*>(&other)) {
       result = RecordFunctor::operator==(other);
     }
     return result;
@@ -2533,10 +2528,8 @@ struct TensorSizesRecord : RecordFunctor {
 
   void operator()(FusionState& fd) final {
     auto arg = fd.getFusionState(args_.at(0).index)->as<TensorView>();
-    auto sizes = tensor_sizes(arg);
-    for (const auto idx : c10::irange(sizes.size())) {
-      fd.setFusionState(outputs_.at(idx).index, sizes[idx]);
-    }
+    auto result = shape(arg);
+    fd.setFusionState(outputs_.at(0).index, result); 
   }
 };
 

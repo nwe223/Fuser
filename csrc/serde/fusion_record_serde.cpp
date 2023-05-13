@@ -767,11 +767,11 @@ void RecordFunctorFactory::registerAllParsers() {
   };
   registerParser(serde::RecordType_Tensor, deserializeTensorRecord);
 
-  auto deserializeTensorSizesRecord = [](const serde::RecordFunctor* buffer) {
-    return new python_frontend::TensorSizesRecord(
+  auto deserializeShapeRecord = [](const serde::RecordFunctor* buffer) {
+    return new python_frontend::ShapeRecord(
         parseStateArgs(buffer->args()), parseStateArgs(buffer->outputs()));
   };
-  registerParser(serde::RecordType_TensorSizes, deserializeTensorSizesRecord);
+  registerParser(serde::RecordType_Shape, deserializeShapeRecord);
 
   auto deserializeVarianceRecord = [](const serde::RecordFunctor* buffer) {
     auto data = buffer->data_as_Norm();

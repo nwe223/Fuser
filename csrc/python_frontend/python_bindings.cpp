@@ -142,24 +142,6 @@ void initNvFuserPythonBindings(PyObject* module) {
     return self.fusion_definition;
   });
 
-  auto shape = [](Tensor arg) -> Vector {
-    FUSER_PERF_SCOPE("Operators.shape");
-    auto fd = arg.fusion_definition;
-    TORCH_CHECK(
-        !fd.completed(),
-        "Attempting to add to a completed definition!");
-    std::vector<Scalar> outputs;
-    std::vector<State> output_state;
-    for (const auto idx : c10::irange(arg.dims)) {
-      outputs.push_back(fd->defineScalar());
-      output_state.push_back(fd->recordingState(outputs[idx]()));
-    }
-    fd->defineRecord(
-        new TensorSizesRecord({fd->recordingState(arg())}, output_state));
-    return outputs;
-  };
-  tensor_class.def_property_readonly("shape", tensor_sizes);
-
   py::class_<Scalar> scalar_class(nvfuser, "Scalar");
   scalar_class.def("__repr__", [](Scalar& self) {
     std::stringstream ss;
@@ -2126,25 +2108,26 @@ void initNvFuserPythonBindings(PyObject* module) {
       py::arg("original_shape"),
       py::arg("dims"),
       py::return_value_policy::reference);
+
+  auto shape_def = [](Tensor arg) {
+    auto fd = arg.fusion_definition;
+    Vector output = fd->defineVector();
+    fd->defineRecord(
+        new ShapeRecord({fd->recordingState(arg())}, {fd->recordingState(output())}));
+    return output;
+  };
+
   nvf_ops.def(
-      "tensor_sizes",
-      [](FusionDefinition::Operators& self, Tensor arg) -> std::vector<Scalar> {
-        FUSER_PERF_SCOPE("Operators.tensor_sizes");
+      "shape",
+      [&shape_def](FusionDefinition::Operators& self, Tensor arg) -> Vector {
+        FUSER_PERF_SCOPE("Operators.shape");
         TORCH_CHECK(
             self.validUse(), "Attempting to add to a completed definition!");
-        FusionDefinition* fd = self.fusion_definition;
-        std::vector<Scalar> outputs;
-        std::vector<State> output_state;
-        for (const auto idx : c10::irange(arg.dims)) {
-          outputs.push_back(fd->defineScalar());
-          output_state.push_back(fd->recordingState(outputs[idx]()));
-        }
-        fd->defineRecord(
-            new TensorSizesRecord({fd->recordingState(arg())}, output_state));
-        return outputs;
+        return shape_def(arg);
       },
       py::arg("arg"),
       py::return_value_policy::reference);
+
   nvf_ops.def(
       "reshape",
       [](FusionDefinition::Operators& self,
