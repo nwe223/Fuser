@@ -705,19 +705,20 @@ struct SqueezeOpRecord : RecordFunctor {
 
 //! Specialized Record Functor for the FusionState's broadcast_in_dim op.
 
-template <typename OutputShapeType>
 struct BroadcastInDimOpRecord : RecordFunctor {
   BroadcastInDimOpRecord(
       std::vector<State> _args,
       std::vector<State> _outputs,
       std::string _name,
       serde::RecordType record_type,
+      size_t output_ndims,
       std::vector<int64_t> broadcast_dims)
       : RecordFunctor(
             std::move(_args),
             std::move(_outputs),
             _name,
             record_type),
+        output_ndims_(output_ndims),
         broadcast_dims_(std::move(broadcast_dims)) {}
   virtual ~BroadcastInDimOpRecord() = default;
   virtual RecordFunctor* clone() final {
@@ -725,16 +726,17 @@ struct BroadcastInDimOpRecord : RecordFunctor {
   }
 
   //! Child specific hash function in lower 32 bits.
-  //! | 31 -------------------------------------  0 |
-  //! | broadcast_dims hash                         |
+  //! | 31 ------ 28 | 27 -----------------------  0 |
+  //! | output_ndims | broadcast_dims hash           |
   virtual size_t hash() const final {
     auto result = RecordFunctor::hash();
     size_t broadcast_dims_hash = 0;
     for (auto dim : broadcast_dims_) {
-      broadcast_dims_hash |= 1 << ((args.at(1).size - 1) - dim);
+      broadcast_dims_hash |= 1 << ((output_ndims_ - 1) - dim);
     }
-    broadcast_dims_hash = broadcast_dims_hash & 0xffffffff;
-    return result | broadcast_dims_hash;
+    broadcast_dims_hash = broadcast_dims_hash & 0x0fffffff;
+    auto output_ndims_hash = (output_ndims_ & 0xf) << 28;
+    return result | broadcast_dims_hash | output_ndims_hash;
   }
 
   virtual bool operator==(const RecordFunctor& other) const final {
@@ -742,7 +744,9 @@ struct BroadcastInDimOpRecord : RecordFunctor {
     if (auto child_ptr = dynamic_cast<const BroadcastInDimOpRecord*>(&other)) {
       result = RecordFunctor::operator==(other);
       if (result) {
-        result = (broadcast_dims_.size() == child_ptr->broadcast_dims_.size());
+        result =
+            (broadcast_dims_.size() == child_ptr->broadcast_dims_.size()) &&
+            (output_ndims_ == child_ptr->output_ndims_);
         if (result) {
           for (size_t i = 0; i < broadcast_dims_.size(); ++i) {
             if (broadcast_dims_[i] != child_ptr->broadcast_dims_[i]) {
@@ -756,22 +760,15 @@ struct BroadcastInDimOpRecord : RecordFunctor {
     return result;
   }
 
-  inline c10::optional<std::vector<Val*>> expandShape(
-      const FusionState& fd,
-      const std::vector<bool>& expand_dim,
-      const std::vector<OutputShapeType>& shape) const;
-
-  //! The operator() call is specialize with th expandShape() method based on
-  //! the OutputShapeType template parameter
   virtual void operator()(FusionState& fd) final {
     auto arg = fd.getFusionState(args_.at(0).index)->template as<TensorView>();
 
     const auto& arg_domains_nr = arg->domain()->noReductions();
     const auto arg_ndims = arg_domains_nr.size();
     TORCH_CHECK(
-        output_shape_.size() >= arg_ndims,
+        output_ndims_ >= arg_ndims,
         "The new shape is expected to be greater-then-or-equal to the input",
-        output_shape_.size(),
+        output_ndims_,
         arg_ndims);
     TORCH_CHECK(
         arg_ndims == broadcast_dims_.size(),
@@ -779,8 +776,7 @@ struct BroadcastInDimOpRecord : RecordFunctor {
         arg_ndims,
         broadcast_dims_.size());
 
-    std::vector<bool> is_broadcast_dim(output_shape_.size(), true);
-    std::vector<bool> is_expand_dim(output_shape_.size(), true);
+    std::vector<bool> is_broadcast_dim(output_ndims_, true);
     for (const auto idx : c10::irange(broadcast_dims_.size())) {
       if (idx > 0) {
         TORCH_CHECK(
@@ -788,30 +784,22 @@ struct BroadcastInDimOpRecord : RecordFunctor {
             "Broadcast dimension is not greater than the previous value.");
       }
       TORCH_CHECK(
-          broadcast_dims_[idx] < static_cast<int>(output_shape_.size()),
+          broadcast_dims_[idx] < static_cast<int>(output_ndims_),
           "Invalid broadcast_dims value.");
       is_broadcast_dim.at(broadcast_dims_[idx]) = false;
-      // Note: when we expand a broadcasted dimension, we need to expand it
-      // to a concrete size, hence the need for `is_expand_dim` flag and the
-      // expand operation following the broadcast.
-      is_expand_dim.at(broadcast_dims_[idx]) =
-          arg_domains_nr[idx]->isBroadcast();
     }
 
-    auto output = broadcast(arg, is_broadcast_dim);
+    auto bcast_output = broadcast(arg, is_broadcast_dim);
+    auto output =
+        expand(bcast_output, fd.getFusionStateVector(args_.at(1).index));
 
-    c10::optional<std::vector<Val*>> expand_shape =
-        expandShape(fd, is_expand_dim, output_shape_);
-    if (expand_shape.has_value()) {
-      output = expand(output, expand_shape.value());
-    }
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
   void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
     os << ", broadcast_dims=[";
-    first_arg = true;
+    bool first_arg = true;
     for (auto dim : broadcast_dims_) {
       if (first_arg) {
         first_arg = false;
@@ -828,98 +816,21 @@ struct BroadcastInDimOpRecord : RecordFunctor {
 
   virtual std::pair<serde::RecordData, flatbuffers::Offset<void>> recordData(
       flatbuffers::FlatBufferBuilder& builder) const final {
-    return outputShapeRecordData(builder, output_shape_);
-  };
-
-  inline std::pair<serde::RecordData, flatbuffers::Offset<void>>
-  outputShapeRecordData(
-      flatbuffers::FlatBufferBuilder& builder,
-      const std::vector<OutputShapeType>& shape) const;
+    return {
+        serde::RecordData_BroadcastInDim,
+        serde::CreateBroadcastInDimDirect(
+            builder, output_ndims_, &broadcast_dims_)
+            .Union()};
+  }
 
  private:
+  //! The number of dimensions in the output_shape.
+  size_t output_ndims_;
   //! Communicates which dimensions of the output the input tensor maps.
   //! For instance, for output [2, 3, 4] and input [3]. This vector would
   //! contain [1].
   std::vector<int64_t> broadcast_dims_;
 };
-
-//! expandShape Specializations used by operator()
-
-template <>
-inline c10::optional<std::vector<Val*>> BroadcastInDimOpRecord<int64_t>::
-    expandShape(
-        const FusionState& fd,
-        const std::vector<bool>& expand_dim,
-        const std::vector<int64_t>& shape) const {
-  std::vector<Val*> expand_shape(shape.size(), nullptr);
-  bool has_expand = false;
-  for (const auto idx : c10::irange(shape.size())) {
-    if (expand_dim[idx] && shape[idx] != 1 && shape[idx] != -1) {
-      expand_shape[idx] = IrBuilder::create<Int>(shape[idx]);
-      has_expand = true;
-    } else {
-      expand_shape[idx] = IrBuilder::create<Int>(-1);
-    }
-  }
-
-  if (has_expand) {
-    return c10::optional<std::vector<Val*>>(expand_shape);
-  } else {
-    return c10::nullopt;
-  }
-}
-
-template <>
-inline c10::optional<std::vector<Val*>> BroadcastInDimOpRecord<State>::
-    expandShape(
-        const FusionState& fd,
-        const std::vector<bool>& expand_dim,
-        const std::vector<State>& shape) const {
-  std::vector<Val*> expand_shape(shape.size(), nullptr);
-  std::transform(
-      shape.begin(),
-      shape.end(),
-      expand_shape.begin(),
-      [&fd](const State& state) {
-        return fd.getFusionState(state.index)->template as<Val>();
-      });
-  return c10::optional<std::vector<Val*>>(expand_shape);
-}
-
-//! outputShapeRecordData Specializations used by recordData()
-
-template <>
-inline std::pair<serde::RecordData, flatbuffers::Offset<void>>
-BroadcastInDimOpRecord<int64_t>::outputShapeRecordData(
-    flatbuffers::FlatBufferBuilder& builder,
-    const std::vector<int64_t>& shape) const {
-  return {
-      serde::RecordData_BroadcastInDim,
-      serde::CreateBroadcastInDimDirect(builder, &shape, &broadcast_dims_)
-          .Union()};
-}
-
-template <>
-inline std::pair<serde::RecordData, flatbuffers::Offset<void>>
-BroadcastInDimOpRecord<State>::outputShapeRecordData(
-    flatbuffers::FlatBufferBuilder& builder,
-    const std::vector<State>& shape) const {
-  std::vector<serde::State> fb_output_shape;
-  for (auto& it : shape) {
-    fb_output_shape.push_back(serde::State(it.index, it.stype));
-  }
-  auto output_shape_fb = builder.CreateVectorOfStructs(
-      fb_output_shape.data(), fb_output_shape.size());
-
-  auto bcast_dims_fb = builder.CreateVector(broadcast_dims_);
-
-  serde::BroadcastInDimSymbolicBuilder bcast_builder(builder);
-  bcast_builder.add_output_shape(output_shape_fb);
-  bcast_builder.add_broadcast_dims(bcast_dims_fb);
-  auto bcast_in_dim_data = bcast_builder.Finish();
-
-  return {serde::RecordData_BroadcastInDimSymbolic, bcast_in_dim_data.Union()};
-}
 
 //! Specialized Record Functor for the FusionState's broadcast op.
 

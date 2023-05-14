@@ -32,9 +32,6 @@ struct BroadcastBuilder;
 struct BroadcastInDim;
 struct BroadcastInDimBuilder;
 
-struct BroadcastInDimSymbolic;
-struct BroadcastInDimSymbolicBuilder;
-
 struct Dtype;
 struct DtypeBuilder;
 
@@ -204,73 +201,71 @@ enum RecordType : int32_t {
   RecordType_BatchNormOp = 1,
   RecordType_BroadcastOp = 2,
   RecordType_BroadcastInDim = 3,
-  RecordType_BroadcastInDimSymbolic = 4,
-  RecordType_CastTv = 5,
-  RecordType_CastVal = 6,
-  RecordType_CatOp = 7,
-  RecordType_End = 8,
-  RecordType_FullOp = 9,
-  RecordType_IotaOp = 10,
-  RecordType_IndexSelectOp = 11,
-  RecordType_TorchGatherOp = 12,
-  RecordType_TakeAlongAxisOp = 13,
-  RecordType_Unary_TV = 14,
-  RecordType_Unary_VAL = 15,
-  RecordType_Binary_TV = 16,
-  RecordType_Binary_VAL = 17,
-  RecordType_Binary_TV_VAL = 18,
-  RecordType_Binary_VAL_TV = 19,
-  RecordType_Ternary_TV = 20,
-  RecordType_Ternary_VAL = 21,
-  RecordType_Ternary_TV_TV_VAL = 22,
-  RecordType_Ternary_TV_VAL_TV = 23,
-  RecordType_Ternary_VAL_TV_TV = 24,
-  RecordType_Ternary_VAL_VAL_TV = 25,
-  RecordType_Ternary_TV_VAL_VAL = 26,
-  RecordType_Ternary_VAL_TV_VAL = 27,
-  RecordType_Ternary_Alpha_TV = 28,
-  RecordType_Ternary_Alpha_VAL = 29,
-  RecordType_Ternary_Alpha_TV_TV_VAL = 30,
-  RecordType_Ternary_Alpha_TV_VAL_TV = 31,
-  RecordType_Ternary_Alpha_VAL_TV_TV = 32,
-  RecordType_Ternary_Alpha_VAL_VAL_TV = 33,
-  RecordType_Ternary_Alpha_TV_VAL_VAL = 34,
-  RecordType_Ternary_Alpha_VAL_TV_VAL = 35,
-  RecordType_OutputTv = 36,
-  RecordType_OutputVal = 37,
-  RecordType_PadOp = 38,
-  RecordType_PermuteOp = 39,
-  RecordType_RandomOp = 40,
-  RecordType_ReductionMax = 41,
-  RecordType_ReductionMin = 42,
-  RecordType_ReductionProd = 43,
-  RecordType_ReductionSum = 44,
-  RecordType_ReshapeOp = 45,
-  RecordType_ScalarConstantBool = 46,
-  RecordType_ScalarConstantComplexDouble = 47,
-  RecordType_ScalarConstantDouble = 48,
-  RecordType_ScalarConstantInt = 49,
-  RecordType_ScalarInput = 50,
-  RecordType_Shape = 51,
-  RecordType_SliceOp = 52,
-  RecordType_SqueezeOp = 53,
-  RecordType_Start = 54,
-  RecordType_Tensor = 55,
-  RecordType_VarianceOp = 56,
-  RecordType_VarianceMeanOp = 57,
-  RecordType_VectorConstantInt = 58,
-  RecordType_VectorInput = 59,
+  RecordType_CastTv = 4,
+  RecordType_CastVal = 5,
+  RecordType_CatOp = 6,
+  RecordType_End = 7,
+  RecordType_FullOp = 8,
+  RecordType_IotaOp = 9,
+  RecordType_IndexSelectOp = 10,
+  RecordType_TorchGatherOp = 11,
+  RecordType_TakeAlongAxisOp = 12,
+  RecordType_Unary_TV = 13,
+  RecordType_Unary_VAL = 14,
+  RecordType_Binary_TV = 15,
+  RecordType_Binary_VAL = 16,
+  RecordType_Binary_TV_VAL = 17,
+  RecordType_Binary_VAL_TV = 18,
+  RecordType_Ternary_TV = 19,
+  RecordType_Ternary_VAL = 20,
+  RecordType_Ternary_TV_TV_VAL = 21,
+  RecordType_Ternary_TV_VAL_TV = 22,
+  RecordType_Ternary_VAL_TV_TV = 23,
+  RecordType_Ternary_VAL_VAL_TV = 24,
+  RecordType_Ternary_TV_VAL_VAL = 25,
+  RecordType_Ternary_VAL_TV_VAL = 26,
+  RecordType_Ternary_Alpha_TV = 27,
+  RecordType_Ternary_Alpha_VAL = 28,
+  RecordType_Ternary_Alpha_TV_TV_VAL = 29,
+  RecordType_Ternary_Alpha_TV_VAL_TV = 30,
+  RecordType_Ternary_Alpha_VAL_TV_TV = 31,
+  RecordType_Ternary_Alpha_VAL_VAL_TV = 32,
+  RecordType_Ternary_Alpha_TV_VAL_VAL = 33,
+  RecordType_Ternary_Alpha_VAL_TV_VAL = 34,
+  RecordType_OutputTv = 35,
+  RecordType_OutputVal = 36,
+  RecordType_PadOp = 37,
+  RecordType_PermuteOp = 38,
+  RecordType_RandomOp = 39,
+  RecordType_ReductionMax = 40,
+  RecordType_ReductionMin = 41,
+  RecordType_ReductionProd = 42,
+  RecordType_ReductionSum = 43,
+  RecordType_ReshapeOp = 44,
+  RecordType_ScalarConstantBool = 45,
+  RecordType_ScalarConstantComplexDouble = 46,
+  RecordType_ScalarConstantDouble = 47,
+  RecordType_ScalarConstantInt = 48,
+  RecordType_ScalarInput = 49,
+  RecordType_Shape = 50,
+  RecordType_SliceOp = 51,
+  RecordType_SqueezeOp = 52,
+  RecordType_Start = 53,
+  RecordType_Tensor = 54,
+  RecordType_VarianceOp = 55,
+  RecordType_VarianceMeanOp = 56,
+  RecordType_VectorConstantInt = 57,
+  RecordType_VectorInput = 58,
   RecordType_MIN = RecordType_Base,
   RecordType_MAX = RecordType_VectorInput
 };
 
-inline const RecordType (&EnumValuesRecordType())[60] {
+inline const RecordType (&EnumValuesRecordType())[59] {
   static const RecordType values[] = {
       RecordType_Base,
       RecordType_BatchNormOp,
       RecordType_BroadcastOp,
       RecordType_BroadcastInDim,
-      RecordType_BroadcastInDimSymbolic,
       RecordType_CastTv,
       RecordType_CastVal,
       RecordType_CatOp,
@@ -330,12 +325,11 @@ inline const RecordType (&EnumValuesRecordType())[60] {
 }
 
 inline const char* const* EnumNamesRecordType() {
-  static const char* const names[61] = {
+  static const char* const names[60] = {
       "Base",
       "BatchNormOp",
       "BroadcastOp",
       "BroadcastInDim",
-      "BroadcastInDimSymbolic",
       "CastTv",
       "CastVal",
       "CatOp",
@@ -408,38 +402,36 @@ enum RecordData : uint8_t {
   RecordData_Bool = 2,
   RecordData_Broadcast = 3,
   RecordData_BroadcastInDim = 4,
-  RecordData_BroadcastInDimSymbolic = 5,
-  RecordData_ComplexDouble = 6,
-  RecordData_Double = 7,
-  RecordData_Dtype = 8,
-  RecordData_Dimension = 9,
-  RecordData_Int = 10,
-  RecordData_Norm = 11,
-  RecordData_Output = 12,
-  RecordData_Pad = 13,
-  RecordData_Permute = 14,
-  RecordData_Slice = 15,
-  RecordData_Squeeze = 16,
-  RecordData_Reduction = 17,
-  RecordData_Reshape = 18,
-  RecordData_ScalarInput = 19,
-  RecordData_Tensor = 20,
-  RecordData_TensorCreation = 21,
-  RecordData_TensorCreationSymbolic = 22,
-  RecordData_VectorInt = 23,
-  RecordData_VectorInput = 24,
+  RecordData_ComplexDouble = 5,
+  RecordData_Double = 6,
+  RecordData_Dtype = 7,
+  RecordData_Dimension = 8,
+  RecordData_Int = 9,
+  RecordData_Norm = 10,
+  RecordData_Output = 11,
+  RecordData_Pad = 12,
+  RecordData_Permute = 13,
+  RecordData_Slice = 14,
+  RecordData_Squeeze = 15,
+  RecordData_Reduction = 16,
+  RecordData_Reshape = 17,
+  RecordData_ScalarInput = 18,
+  RecordData_Tensor = 19,
+  RecordData_TensorCreation = 20,
+  RecordData_TensorCreationSymbolic = 21,
+  RecordData_VectorInt = 22,
+  RecordData_VectorInput = 23,
   RecordData_MIN = RecordData_NONE,
   RecordData_MAX = RecordData_VectorInput
 };
 
-inline const RecordData (&EnumValuesRecordData())[25] {
+inline const RecordData (&EnumValuesRecordData())[24] {
   static const RecordData values[] = {
       RecordData_NONE,
       RecordData_BatchNorm,
       RecordData_Bool,
       RecordData_Broadcast,
       RecordData_BroadcastInDim,
-      RecordData_BroadcastInDimSymbolic,
       RecordData_ComplexDouble,
       RecordData_Double,
       RecordData_Dtype,
@@ -463,13 +455,12 @@ inline const RecordData (&EnumValuesRecordData())[25] {
 }
 
 inline const char* const* EnumNamesRecordData() {
-  static const char* const names[26] = {
+  static const char* const names[25] = {
       "NONE",
       "BatchNorm",
       "Bool",
       "Broadcast",
       "BroadcastInDim",
-      "BroadcastInDimSymbolic",
       "ComplexDouble",
       "Double",
       "Dtype",
@@ -523,11 +514,6 @@ struct RecordDataTraits<nvfuser::serde::Broadcast> {
 template <>
 struct RecordDataTraits<nvfuser::serde::BroadcastInDim> {
   static const RecordData enum_value = RecordData_BroadcastInDim;
-};
-
-template <>
-struct RecordDataTraits<nvfuser::serde::BroadcastInDimSymbolic> {
-  static const RecordData enum_value = RecordData_BroadcastInDimSymbolic;
 };
 
 template <>
@@ -1012,19 +998,18 @@ inline flatbuffers::Offset<Broadcast> CreateBroadcastDirect(
 struct BroadcastInDim FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   typedef BroadcastInDimBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
-    VT_OUTPUT_SHAPE = 4,
+    VT_OUTPUT_NDIMS = 4,
     VT_BROADCAST_DIMS = 6
   };
-  const flatbuffers::Vector<int64_t>* output_shape() const {
-    return GetPointer<const flatbuffers::Vector<int64_t>*>(VT_OUTPUT_SHAPE);
+  uint64_t output_ndims() const {
+    return GetField<uint64_t>(VT_OUTPUT_NDIMS, 0);
   }
   const flatbuffers::Vector<int64_t>* broadcast_dims() const {
     return GetPointer<const flatbuffers::Vector<int64_t>*>(VT_BROADCAST_DIMS);
   }
   bool Verify(flatbuffers::Verifier& verifier) const {
     return VerifyTableStart(verifier) &&
-        VerifyOffset(verifier, VT_OUTPUT_SHAPE) &&
-        verifier.VerifyVector(output_shape()) &&
+        VerifyField<uint64_t>(verifier, VT_OUTPUT_NDIMS) &&
         VerifyOffset(verifier, VT_BROADCAST_DIMS) &&
         verifier.VerifyVector(broadcast_dims()) && verifier.EndTable();
   }
@@ -1034,9 +1019,8 @@ struct BroadcastInDimBuilder {
   typedef BroadcastInDim Table;
   flatbuffers::FlatBufferBuilder& fbb_;
   flatbuffers::uoffset_t start_;
-  void add_output_shape(
-      flatbuffers::Offset<flatbuffers::Vector<int64_t>> output_shape) {
-    fbb_.AddOffset(BroadcastInDim::VT_OUTPUT_SHAPE, output_shape);
+  void add_output_ndims(uint64_t output_ndims) {
+    fbb_.AddElement<uint64_t>(BroadcastInDim::VT_OUTPUT_NDIMS, output_ndims, 0);
   }
   void add_broadcast_dims(
       flatbuffers::Offset<flatbuffers::Vector<int64_t>> broadcast_dims) {
@@ -1055,97 +1039,22 @@ struct BroadcastInDimBuilder {
 
 inline flatbuffers::Offset<BroadcastInDim> CreateBroadcastInDim(
     flatbuffers::FlatBufferBuilder& _fbb,
-    flatbuffers::Offset<flatbuffers::Vector<int64_t>> output_shape = 0,
+    uint64_t output_ndims = 0,
     flatbuffers::Offset<flatbuffers::Vector<int64_t>> broadcast_dims = 0) {
   BroadcastInDimBuilder builder_(_fbb);
+  builder_.add_output_ndims(output_ndims);
   builder_.add_broadcast_dims(broadcast_dims);
-  builder_.add_output_shape(output_shape);
   return builder_.Finish();
 }
 
 inline flatbuffers::Offset<BroadcastInDim> CreateBroadcastInDimDirect(
     flatbuffers::FlatBufferBuilder& _fbb,
-    const std::vector<int64_t>* output_shape = nullptr,
+    uint64_t output_ndims = 0,
     const std::vector<int64_t>* broadcast_dims = nullptr) {
-  auto output_shape__ =
-      output_shape ? _fbb.CreateVector<int64_t>(*output_shape) : 0;
   auto broadcast_dims__ =
       broadcast_dims ? _fbb.CreateVector<int64_t>(*broadcast_dims) : 0;
   return nvfuser::serde::CreateBroadcastInDim(
-      _fbb, output_shape__, broadcast_dims__);
-}
-
-struct BroadcastInDimSymbolic FLATBUFFERS_FINAL_CLASS
-    : private flatbuffers::Table {
-  typedef BroadcastInDimSymbolicBuilder Builder;
-  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
-    VT_OUTPUT_SHAPE = 4,
-    VT_BROADCAST_DIMS = 6
-  };
-  const flatbuffers::Vector<const nvfuser::serde::State*>* output_shape()
-      const {
-    return GetPointer<const flatbuffers::Vector<const nvfuser::serde::State*>*>(
-        VT_OUTPUT_SHAPE);
-  }
-  const flatbuffers::Vector<int64_t>* broadcast_dims() const {
-    return GetPointer<const flatbuffers::Vector<int64_t>*>(VT_BROADCAST_DIMS);
-  }
-  bool Verify(flatbuffers::Verifier& verifier) const {
-    return VerifyTableStart(verifier) &&
-        VerifyOffset(verifier, VT_OUTPUT_SHAPE) &&
-        verifier.VerifyVector(output_shape()) &&
-        VerifyOffset(verifier, VT_BROADCAST_DIMS) &&
-        verifier.VerifyVector(broadcast_dims()) && verifier.EndTable();
-  }
-};
-
-struct BroadcastInDimSymbolicBuilder {
-  typedef BroadcastInDimSymbolic Table;
-  flatbuffers::FlatBufferBuilder& fbb_;
-  flatbuffers::uoffset_t start_;
-  void add_output_shape(
-      flatbuffers::Offset<flatbuffers::Vector<const nvfuser::serde::State*>>
-          output_shape) {
-    fbb_.AddOffset(BroadcastInDimSymbolic::VT_OUTPUT_SHAPE, output_shape);
-  }
-  void add_broadcast_dims(
-      flatbuffers::Offset<flatbuffers::Vector<int64_t>> broadcast_dims) {
-    fbb_.AddOffset(BroadcastInDimSymbolic::VT_BROADCAST_DIMS, broadcast_dims);
-  }
-  explicit BroadcastInDimSymbolicBuilder(flatbuffers::FlatBufferBuilder& _fbb)
-      : fbb_(_fbb) {
-    start_ = fbb_.StartTable();
-  }
-  flatbuffers::Offset<BroadcastInDimSymbolic> Finish() {
-    const auto end = fbb_.EndTable(start_);
-    auto o = flatbuffers::Offset<BroadcastInDimSymbolic>(end);
-    return o;
-  }
-};
-
-inline flatbuffers::Offset<BroadcastInDimSymbolic> CreateBroadcastInDimSymbolic(
-    flatbuffers::FlatBufferBuilder& _fbb,
-    flatbuffers::Offset<flatbuffers::Vector<const nvfuser::serde::State*>>
-        output_shape = 0,
-    flatbuffers::Offset<flatbuffers::Vector<int64_t>> broadcast_dims = 0) {
-  BroadcastInDimSymbolicBuilder builder_(_fbb);
-  builder_.add_broadcast_dims(broadcast_dims);
-  builder_.add_output_shape(output_shape);
-  return builder_.Finish();
-}
-
-inline flatbuffers::Offset<BroadcastInDimSymbolic>
-CreateBroadcastInDimSymbolicDirect(
-    flatbuffers::FlatBufferBuilder& _fbb,
-    const std::vector<nvfuser::serde::State>* output_shape = nullptr,
-    const std::vector<int64_t>* broadcast_dims = nullptr) {
-  auto output_shape__ = output_shape
-      ? _fbb.CreateVectorOfStructs<nvfuser::serde::State>(*output_shape)
-      : 0;
-  auto broadcast_dims__ =
-      broadcast_dims ? _fbb.CreateVector<int64_t>(*broadcast_dims) : 0;
-  return nvfuser::serde::CreateBroadcastInDimSymbolic(
-      _fbb, output_shape__, broadcast_dims__);
+      _fbb, output_ndims, broadcast_dims__);
 }
 
 struct Dtype FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
@@ -2104,12 +2013,6 @@ struct RecordFunctor FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
         ? static_cast<const nvfuser::serde::BroadcastInDim*>(data())
         : nullptr;
   }
-  const nvfuser::serde::BroadcastInDimSymbolic* data_as_BroadcastInDimSymbolic()
-      const {
-    return data_type() == nvfuser::serde::RecordData_BroadcastInDimSymbolic
-        ? static_cast<const nvfuser::serde::BroadcastInDimSymbolic*>(data())
-        : nullptr;
-  }
   const nvfuser::serde::ComplexDouble* data_as_ComplexDouble() const {
     return data_type() == nvfuser::serde::RecordData_ComplexDouble
         ? static_cast<const nvfuser::serde::ComplexDouble*>(data())
@@ -2240,12 +2143,6 @@ template <>
 inline const nvfuser::serde::BroadcastInDim* RecordFunctor::data_as<
     nvfuser::serde::BroadcastInDim>() const {
   return data_as_BroadcastInDim();
-}
-
-template <>
-inline const nvfuser::serde::BroadcastInDimSymbolic* RecordFunctor::data_as<
-    nvfuser::serde::BroadcastInDimSymbolic>() const {
-  return data_as_BroadcastInDimSymbolic();
 }
 
 template <>
@@ -2639,11 +2536,6 @@ inline bool VerifyRecordData(
     }
     case RecordData_BroadcastInDim: {
       auto ptr = reinterpret_cast<const nvfuser::serde::BroadcastInDim*>(obj);
-      return verifier.VerifyTable(ptr);
-    }
-    case RecordData_BroadcastInDimSymbolic: {
-      auto ptr =
-          reinterpret_cast<const nvfuser::serde::BroadcastInDimSymbolic*>(obj);
       return verifier.VerifyTable(ptr);
     }
     case RecordData_ComplexDouble: {

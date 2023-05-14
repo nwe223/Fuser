@@ -1719,11 +1719,12 @@ void initNvFuserPythonBindings(PyObject* module) {
             output_shape.size >= broadcast_dims.size(),
             "broadcast_dims vector size is too big for output shape!");
         Tensor output = fd->defineTensor(output_shape.size);
-        fd->defineRecord(new BroadcastInDimOpRecord<int64_t>(
+        fd->defineRecord(new BroadcastInDimOpRecord(
             {fd->recordingState(arg()), fd->recordingState(output_shape())},
             {fd->recordingState(output())},
             "ops.broadcast_in_dim",
             serde::RecordType_BroadcastInDim,
+            output_shape.size,
             std::move(broadcast_dims)));
         return output;
       },
@@ -1732,7 +1733,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       py::arg("broadcast_dims"),
       py::return_value_policy::reference);
   // Symbolic Output Shape Overload
-  nvf_ops.def(
+  /*nvf_ops.def(
       "broadcast_in_dim",
       [](FusionDefinition::Operators& self,
          Tensor arg,
@@ -1765,7 +1766,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       py::arg("arg"),
       py::arg("output_shape"),
       py::arg("broadcast_dims"),
-      py::return_value_policy::reference);
+      py::return_value_policy::reference);*/
   nvf_ops.def(
       "broadcast",
       [](FusionDefinition::Operators& self,
