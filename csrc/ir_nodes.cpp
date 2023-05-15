@@ -3236,6 +3236,40 @@ void TensorDomain::setAllocationDomain(
   contiguity_ = std::move(new_contiguity);
 }
 
+Align::Align(
+    IrBuilderPasskey passkey,
+    IterDomain* outer,
+    std::vector<IterDomain*> inputs,
+    Expr* tv_expr)
+    : Expr(passkey) {
+  addOutput(outer);
+  for (auto in : inputs) {
+    addInput(in);
+  }
+  addAttribute(tv_expr);
+}
+
+std::string Align::toString(int indent_size) const {
+  return toInlineString(indent_size) + "\n";
+}
+
+std::string Align::toInlineString(int indent_size) const {
+  std::stringstream ss;
+  ss << "Align: {";
+  bool first = true;
+  for (auto in : inputs()) {
+    if (!first) {
+      ss << ", ";
+      first = false;
+    }
+    ss << in->toString();
+  }
+  ss << "}";
+  return ss.str();
+}
+
+NVFUSER_DEFINE_CLONE_AND_CREATE(Align)
+
 Split::Split(
     IrBuilderPasskey passkey,
     IterDomain* outer,

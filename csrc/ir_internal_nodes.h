@@ -1387,6 +1387,45 @@ class TORCH_CUDA_CU_API LoadStoreOp : public Expr {
   }
 };
 
+//! This represents the common relation between IterDomains that appear in
+//! corresponding positions across multiple inputs to a TensorView expression.
+//! For example, in the following Fusion:
+//!   T0  # [I0]
+//!   T1  # [I1, I2]
+//!   T2 = sum(T1, {1});  # [I3, I4]
+//!   T3 = mul(T0, T2);  # [I5]
+//! Here, I3 = align({I1}), I4 = reduce(I2), I5 = align({I0, I3})
+//! TODO: introduce reduce also? It would after all connect the graph...
+class TORCH_CUDA_CU_API Align : public Expr {
+ public:
+  using Expr::Expr;
+
+  Align(
+      IrBuilderPasskey,
+      IterDomain* out,
+      std::vector<IterDomain*> inputs,
+      Expr* tv_expr);
+
+  NVFUSER_DECLARE_CLONE_AND_CREATE
+
+  const char* getOpString() const override {
+    return "Align";
+  }
+
+  //! Return the TensorView expression whose inputs have IterDomains matching
+  //! inputs() in matching positions.
+  Expr* tvExpr() const {
+    return attribute(0)->as<Expr>();
+  }
+
+  std::string toString(int indent_size = 0) const override;
+  std::string toInlineString(int indent_size = 0) const override;
+
+  IterDomain* out() const {
+    return output(0)->as<IterDomain>();
+  }
+};
+
 //! Representation a split on an IterDomain by "factor"
 //! inner_split dictates if the factor section of the split should be inside the
 //! remainer or outside.
