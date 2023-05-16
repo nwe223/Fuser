@@ -104,6 +104,7 @@ enum RecordType:int {
     VarianceMeanOp,
     VectorConstantInt,
     VectorInput,
+    VectorScalar,
 }
 
 // The RecordData hold the attribute information for each Record Functor.
@@ -274,16 +275,11 @@ table VectorInput {
   dtype: DataType;
 }
 
-// Data for Vector of Constant Int or Long
-table VectorInt {
-  int_vals: [Scalar];
+// Data for Vector of Scalars
+table VectorScalar {
+  state_vals: [State];
   size: long;
   dtype: DataType;
-}
-
-// The Scalar struct represents a Scalar IR Node.
-struct Scalar {
-  index: int;
 }
 
 // The State struct represents each scalar and tensor value.

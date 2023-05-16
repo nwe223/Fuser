@@ -1374,14 +1374,14 @@ struct OutputRecord : RecordFunctor {
       TORCH_CHECK(
           stride_order_.empty(),
           "stride_order can't be dictated for aliased outputs.");
-      if (std::is_same<OutputType, TensorView>::value) {
+      if (std::is_same_v<OutputType, TensorView>) {
         fd.aliasOutputToInput(output, alias_input);
       } else {
         TORCH_INTERNAL_ASSERT(false, "Scalar outputs should not alias inputs.");
       }
     } else {
       // With C++17, this statement should be "if constexpr"
-      if (std::is_same<OutputType, TensorView>::value) {
+      if (std::is_same_v<OutputType, TensorView>) {
         auto tv_output = output->template as<TensorView>();
 
         if (!stride_order_.empty()) {
@@ -2660,6 +2660,8 @@ struct RandomOpRecord : RecordFunctor {
 
 template <typename ValueType>
 struct VectorRecord : RecordFunctor {
+  using vtype = std::conditional_t<std::is_same_v<ValueType, Scalar>, State, ValueType>;
+ 
   VectorRecord(
       std::vector<State> _outputs,
       serde::RecordType record_type,
@@ -2667,9 +2669,24 @@ struct VectorRecord : RecordFunctor {
       int64_t size,
       PrimDataType dtype)
       : RecordFunctor({}, std::move(_outputs), "define_vector", record_type),
-        value_(std::move(value)),
+        value_(),
         size_(size),
-        dtype_(dtype) {}
+        dtype_(dtype) {
+    if constexpr (std::is_same_v<ValueType, Scalar>) {
+      if (value.has_value()) {
+        std::vector<State> state_vector;
+        state_vector.reserve(value.value().size());
+        for(auto &v : value.value()) {
+          state_vector.emplace_back(v.index, serde::StateType_Scalar);
+        }
+        value_ = std::move(state_vector);
+      } else {
+        value_ = std::nullopt;
+      }
+    } else {
+      value_ = std::move(value);
+    } 
+  }
   virtual ~VectorRecord() = default;
   virtual RecordFunctor* clone() final {
     return new VectorRecord(*this);
@@ -2701,9 +2718,9 @@ struct VectorRecord : RecordFunctor {
         "Only Int Dtype is not supported by a vector of sizes: ",
         dtype_);
     if (value_.has_value()) {
-      if constexpr (std::is_same_v<ValueType, Scalar>) {
+      if constexpr (std::is_same_v<vtype, State>) {
         for (int64_t i = 0; i < size_; ++i) {
-          output.at(i) = fd.getFusionState(value_.value().at(i)());
+          output.at(i) = fd.getFusionState(value_.value().at(i).index);
         } 
       } else {
         for (int64_t i = 0; i < size_; ++i) {
@@ -2712,7 +2729,7 @@ struct VectorRecord : RecordFunctor {
       }
     } else {
       for (int64_t i = 0; i < size_; ++i) {
-        output[i] = IrBuilder::create<Int>();
+        output.at(i) = IrBuilder::create<Int>();
         fd.addInput(output.at(i));
       }
     }
@@ -2737,6 +2754,7 @@ struct VectorRecord : RecordFunctor {
       os << "None";
     }
 
+    os << ", size=" << size_;
     os << ", dtype=" << dtypeToPyString(dtype_);
     if (close_function) {
       os << ")";
@@ -2745,43 +2763,43 @@ struct VectorRecord : RecordFunctor {
 
   virtual std::pair<serde::RecordData, flatbuffers::Offset<void>> recordData(
       flatbuffers::FlatBufferBuilder& builder) const final {
-    return valueRecordData(builder, value_);
+    if (value_.has_value()) {
+      if constexpr (std::is_same_v<vtype, State>) {
+        std::vector<serde::State> serde_state;
+        serde_state.reserve(value_.value().size());
+        for (auto &v : value_.value()) {
+          serde_state.emplace_back(v.index, v.stype);
+        }
+        return {
+            serde::RecordData_VectorScalar,
+            serde::CreateVectorScalarDirect(
+                builder, &serde_state, size_, serde::mapToSerdeDtype(dtype_))
+                .Union()};
+      } else if constexpr (std::is_same_v<vtype, int64_t>) {
+        return {
+            serde::RecordData_VectorInt,
+            serde::CreateVectorIntDirect(
+                builder, &(value_.value()), size_, serde::mapToSerdeDtype(dtype_))
+                .Union()};
+      } else {
+        TORCH_CHECK(false, "Invalid value type for serialize function in VectorRecord!");
+      }
+    } else {
+      return {
+          serde::RecordData_VectorInput,
+          serde::CreateVectorInput(builder, size_, serde::mapToSerdeDtype(dtype_))
+              .Union()};
+    }
   };
-
-  inline std::pair<serde::RecordData, flatbuffers::Offset<void>> valueRecordData(
-      flatbuffers::FlatBufferBuilder& builder,
-      const std::optional<std::vector<ValueType>>& value) const;
 
  private:
   //! The vector's value.
-  std::optional<std::vector<ValueType>> value_;
+  std::optional<std::vector<vtype>> value_;
   //! Since the vector's value is optional, the size is stored here
   int64_t size_;
   //! Scalar data type.
   PrimDataType dtype_;
 };
-
-//! valueRecordData Specializations used by recordData() for VectorRecord
-
-template <>
-inline std::pair<serde::RecordData, flatbuffers::Offset<void>> VectorRecord<
-    int64_t>::
-    valueRecordData(
-        flatbuffers::FlatBufferBuilder& builder,
-        const std::optional<std::vector<int64_t>>& value) const {
-  if (value.has_value()) {
-    return {
-        serde::RecordData_VectorInt,
-        serde::CreateVectorIntDirect(
-            builder, &(value.value()), size_, serde::mapToSerdeDtype(dtype_))
-            .Union()};
-  } else {
-    return {
-        serde::RecordData_VectorInput,
-        serde::CreateVectorInput(builder, size_, serde::mapToSerdeDtype(dtype_))
-            .Union()};
-  }
-}
 
 } // namespace nvfuser::python_frontend
 

@@ -44,23 +44,6 @@ const char* dtypeToPyString(PrimDataType t) {
   return nullptr;
 }
 
-bool Tensor::operator==(const Tensor& other) const {
-  return (index == other.index) && (dims == other.dims);
-}
-
-bool Scalar::operator==(const Scalar& other) const {
-  return (index == other.index);
-}
-
-std::ostream& operator<<(std::ostream& os, const Scalar& state) {
-  os << "S" << state();
-  return os;
-}
-
-bool Vector::operator==(const Vector& other) const {
-  return (index == other.index) && (size == other.size);
-}
-
 FusionDefinition::FusionDefinition(c10::optional<size_t> id, size_t max_length)
     : FusionState(),
       max_length_(max_length),

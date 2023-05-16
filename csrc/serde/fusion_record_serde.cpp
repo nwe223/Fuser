@@ -23,6 +23,16 @@ std::vector<python_frontend::State> parseStateArgs(
   return result;
 }
 
+std::vector<python_frontend::Scalar> parseScalars(
+    const flatbuffers::Vector<const serde::State*>* args) {
+  std::vector<python_frontend::Scalar> result;
+  for (auto s : *args) {
+    TORCH_CHECK(s->type() == serde::StateType_Scalar, "Invalid StateType!");
+    result.emplace_back(s->index(), nullptr);
+  }
+  return result;
+}
+
 template <typename T>
 std::vector<T> parseVector(const flatbuffers::Vector<T>* fb_vector) {
   std::vector<T> result(fb_vector->begin(), fb_vector->end());
@@ -804,6 +814,19 @@ void RecordFunctorFactory::registerAllParsers() {
         mapToNvfuserDtype(data->dtype()));
   };
   registerParser(serde::RecordType_VectorInput, deserializeVectorInputRecord);
+  
+  auto deserializeVectorScalarRecord =
+      [](const serde::RecordFunctor* buffer) {
+        auto data = buffer->data_as_VectorScalar();
+        return new python_frontend::VectorRecord<python_frontend::Scalar>(
+            parseStateArgs(buffer->outputs()),
+            serde::RecordType_VectorScalar,
+            std::optional<std::vector<python_frontend::Scalar>>(parseScalars(data->state_vals())),
+            data->size(),
+            mapToNvfuserDtype(data->dtype()));
+      };
+  registerParser(
+      serde::RecordType_VectorScalar, deserializeVectorScalarRecord);
 }
 
 void RecordFunctorFactory::setupFunctionMaps() {
