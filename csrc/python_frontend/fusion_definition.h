@@ -43,6 +43,8 @@ struct TORCH_CUDA_CU_API Tensor {
     return index;
   }
 
+  bool operator==(const Tensor& other) const;
+
   //! A unique index to identifiy each recorded state item.
   size_t index;
   size_t dims;
@@ -61,6 +63,8 @@ struct TORCH_CUDA_CU_API Scalar {
     return index;
   }
 
+  bool operator==(const Scalar& other) const;
+
   //! A unique index to identifiy each recorded state item.
   size_t index;
 
@@ -70,6 +74,8 @@ struct TORCH_CUDA_CU_API Scalar {
   FusionDefinition* fusion_definition;
 };
 
+std::ostream& operator<<(std::ostream& os, const Scalar& state);
+
 struct TORCH_CUDA_CU_API Vector {
   Vector(size_t _index, size_t _size, FusionDefinition* _fd)
       : index(_index), size(_size), fusion_definition(_fd) {}
@@ -77,6 +83,8 @@ struct TORCH_CUDA_CU_API Vector {
   size_t operator()() const {
     return index;
   }
+
+  bool operator==(const Vector& other) const;
 
   //! A unique index to identifiy each recorded state item.
   size_t index;

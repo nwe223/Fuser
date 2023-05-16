@@ -577,6 +577,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       py::return_value_policy::reference);
 
   NVFUSER_PYTHON_BINDING_CONSTANT_VECTOR(DataType::Int, int64_t);
+  NVFUSER_PYTHON_BINDING_CONSTANT_VECTOR(DataType::Int, Scalar);
 #undef NVFUSER_PYTHON_BINDING_CONSTANT_VECTOR
 
   //! The Operators class is a nested class of FusionDefinition to allow the

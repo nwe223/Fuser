@@ -2701,8 +2701,14 @@ struct VectorRecord : RecordFunctor {
         "Only Int Dtype is not supported by a vector of sizes: ",
         dtype_);
     if (value_.has_value()) {
-      for (int64_t i = 0; i < size_; ++i) {
-        output.at(i) = IrBuilder::create<Int>(value_.value().at(i));
+      if constexpr (std::is_same_v<ValueType, Scalar>) {
+        for (int64_t i = 0; i < size_; ++i) {
+          output.at(i) = fd.getFusionState(value_.value().at(i)());
+        } 
+      } else {
+        for (int64_t i = 0; i < size_; ++i) {
+          output.at(i) = IrBuilder::create<Int>(value_.value().at(i));
+        }
       }
     } else {
       for (int64_t i = 0; i < size_; ++i) {

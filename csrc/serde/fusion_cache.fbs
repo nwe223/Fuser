@@ -131,6 +131,7 @@ union RecordData {
   TensorCreationSymbolic,
   VectorInt,
   VectorInput,
+  VectorScalar,
 }
 
 // Data for Scalar Constant Bool
@@ -260,6 +261,13 @@ table TensorCreationSymbolic {
   dtype: DataType;
 }
 
+// Data for Vector of Constant Int or Long
+table VectorInt {
+  int_vals: [long];
+  size: long;
+  dtype: DataType;
+}
+
 // Data for Input Vector
 table VectorInput {
   size: long;
@@ -268,9 +276,14 @@ table VectorInput {
 
 // Data for Vector of Constant Int or Long
 table VectorInt {
-  int_vals: [long];
+  int_vals: [Scalar];
   size: long;
   dtype: DataType;
+}
+
+// The Scalar struct represents a Scalar IR Node.
+struct Scalar {
+  index: int;
 }
 
 // The State struct represents each scalar and tensor value.
