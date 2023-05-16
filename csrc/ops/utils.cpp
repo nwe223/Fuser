@@ -200,7 +200,7 @@ IterType promoteIterType(IterType type1, IterType type2) {
 
 std::vector<IterDomain*> newOutputDomain(
     const std::vector<Val*>& vals,
-    DataType dtype) {
+    bool create_align_ops) {
   std::vector<TensorView*> tvs;
   for (auto val : vals) {
     if (val->getValType() == ValType::TensorView) {
@@ -215,84 +215,93 @@ std::vector<IterDomain*> newOutputDomain(
       TensorDomain::noReductions(tvs[0]->getMaybeRFactorDomain()).size(),
       nullptr);
 
-  // For the start and stop offsets, take the maximum of input axes.
-  // For now, the offsets of both start and stop are always integer
-  // constant, so we can statically compute them. It is unclear
-  // whether we would need to support dynamic offsetting, e.g.,
-  // shifting by a dynamic offset.
-  std::vector<int64_t> start_offsets(out_domain.size(), 0);
-  std::vector<int64_t> stop_offsets(out_domain.size(), 0);
-  std::vector<Val*> extent_vals(out_domain.size(), nullptr);
-  std::vector<Val*> expanded_extent_vals(out_domain.size(), nullptr);
-  std::vector<c10::optional<IterType>> iter_types(
-      out_domain.size(), c10::nullopt);
+  // Process each output iterdomain in order
+  for (const auto i : c10::irange(out_domain.size())) {
+    // For the start and stop offsets, take the maximum of input axes.
+    // For now, the offsets of both start and stop are always integer
+    // constant, so we can statically compute them. It is unclear
+    // whether we would need to support dynamic offsetting, e.g.,
+    // shifting by a dynamic offset.
+    int64_t start_offset = 0;
+    int64_t stop_offset = 0;
+    Val* extent_val = nullptr;
+    Val* expanded_extent_val = nullptr;
+    std::optional<IterType> iter_type = std::nullopt;
+    std::vector<IterDomain*> aligned_ids(tvs.size(), nullptr);
+    IterDomain* out_id = nullptr;
 
-  for (auto tv : tvs) {
-    auto dom = TensorDomain::noReductions(tv->getMaybeRFactorDomain());
-    TORCH_INTERNAL_ASSERT(
-        dom.size() == out_domain.size(),
-        "Invalid tensor view found while producing an output, it has ",
-        dom.size(),
-        " dimensions but expected ",
-        out_domain.size());
-    for (const auto i : c10::irange(dom.size())) {
+    // Now process all tensorviews
+    for (auto tv : tvs) {
+      auto dom = TensorDomain::noReductions(tv->getMaybeRFactorDomain());
+      TORCH_INTERNAL_ASSERT(
+          dom.size() == out_domain.size(),
+          "Invalid tensor view found while producing an output, it has ",
+          dom.size(),
+          " dimensions but expected ",
+          out_domain.size());
+
+      // Track aligned IDs so that we can connect them with an Align op
+      aligned_ids.push_back(dom[i]);
+
       if (dom[i]->isBroadcast()) {
         if (dom[i]->hasExpandedExtent()) {
-          expanded_extent_vals[i] =
-              promoteSize(expanded_extent_vals[i], dom[i]->expandedExtent());
+          expanded_extent_val =
+              promoteSize(expanded_extent_val, dom[i]->expandedExtent());
         }
         continue;
       }
-      extent_vals[i] = promoteSize(extent_vals[i], dom[i]->extent());
-      if (iter_types[i].has_value()) {
-        iter_types[i] =
-            promoteIterType(iter_types[i].value(), dom[i]->getIterType());
+      extent_val = promoteSize(extent_val, dom[i]->extent());
+      if (iter_type.has_value()) {
+        iter_type = promoteIterType(iter_type.value(), dom[i]->getIterType());
       } else {
-        iter_types[i] = dom[i]->getIterType();
+        iter_type = dom[i]->getIterType();
       }
 
-      auto start_offset = dom[i]->start()->as<Int>();
-      auto stop_offset = dom[i]->stopOffset()->as<Int>();
+      auto start_offset_i = dom[i]->start()->as<Int>();
+      auto stop_offset_i = dom[i]->stopOffset()->as<Int>();
       // Currently, start is always constant
       TORCH_INTERNAL_ASSERT(
-          start_offset->isConstInt(),
+          start_offset_i->isConstInt(),
           "Invalid IterDomain start: ",
-          start_offset);
+          start_offset_i);
       TORCH_INTERNAL_ASSERT(
-          stop_offset->isConstInt(),
+          stop_offset_i->isConstInt(),
           "Invalid IterDomain stop offset: ",
-          stop_offset);
-      start_offsets[i] =
-          std::max(start_offsets[i], start_offset->evaluateInt());
-      stop_offsets[i] = std::max(stop_offsets[i], stop_offset->evaluateInt());
+          stop_offset_i);
+      start_offset = std::max(start_offset, start_offset_i->evaluateInt());
+      stop_offset = std::max(stop_offset, stop_offset_i->evaluateInt());
     }
-  }
-  for (const auto dim_i : c10::irange(out_domain.size())) {
-    if (extent_vals[dim_i] != nullptr) {
+
+    if (extent_val != nullptr) {
       TORCH_INTERNAL_ASSERT(
-          iter_types[dim_i].has_value(),
+          iter_type.has_value(),
           "Could not deduce iter type for new tensor view.");
-      out_domain[dim_i] =
-          IterDomainBuilder(
-              IrBuilder::create<Int>(start_offsets[dim_i]), extent_vals[dim_i])
-              .stop_offset(IrBuilder::create<Int>(stop_offsets[dim_i]))
-              .iter_type(iter_types[dim_i].value())
+      out_id =
+          IterDomainBuilder(IrBuilder::create<Int>(start_offset), extent_val)
+              .stop_offset(IrBuilder::create<Int>(stop_offset))
+              .iter_type(iter_type.value())
               .build();
     } else {
-      out_domain[dim_i] = IterDomainBuilder(
-                              FusionGuard::getCurFusion()->zeroVal(),
-                              FusionGuard::getCurFusion()->oneVal())
-                              .expanded_extent(expanded_extent_vals[dim_i])
-                              .iter_type(IterType::Broadcast)
-                              .build();
+      out_id = IterDomainBuilder(
+                   FusionGuard::getCurFusion()->zeroVal(),
+                   FusionGuard::getCurFusion()->oneVal())
+                   .expanded_extent(expanded_extent_val)
+                   .iter_type(IterType::Broadcast)
+                   .build();
     }
+    if (create_align_ops) {
+      // At this point, we haven't yet defined an expression that we can
+      // reference in the Align op, so we pass nullptr instead
+      IrBuilder::create<Align>(out_id, aligned_ids);
+    }
+    out_domain[i] = out_id;
   }
 
   return out_domain;
 }
 
 TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
-  auto out_domain = newOutputDomain(vals, dtype);
+  auto out_domain = newOutputDomain(vals);
   return IrBuilder::create<TensorView>(
       IrBuilder::create<TensorDomain>(
           out_domain, TensorDomain::getContiguityFilledWith(out_domain, true)),

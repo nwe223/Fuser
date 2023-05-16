@@ -1394,8 +1394,7 @@ class TORCH_CUDA_CU_API LoadStoreOp : public Expr {
 //!   T1  # [I1, I2]
 //!   T2 = sum(T1, {1});  # [I3, I4]
 //!   T3 = mul(T0, T2);  # [I5]
-//! Here, I3 = align({I1}), I4 = reduce(I2), I5 = align({I0, I3})
-//! TODO: introduce reduce also? It would after all connect the graph...
+//! Here, I3 = Align({I1}), I4 = Reduce(I2), I5 = Align({I0, I3})
 class TORCH_CUDA_CU_API Align : public Expr {
  public:
   using Expr::Expr;
@@ -1403,8 +1402,7 @@ class TORCH_CUDA_CU_API Align : public Expr {
   Align(
       IrBuilderPasskey,
       IterDomain* out,
-      std::vector<IterDomain*> inputs,
-      Expr* tv_expr);
+      const std::vector<IterDomain*>& inputs);
 
   NVFUSER_DECLARE_CLONE_AND_CREATE
 
@@ -1412,18 +1410,8 @@ class TORCH_CUDA_CU_API Align : public Expr {
     return "Align";
   }
 
-  //! Return the TensorView expression whose inputs have IterDomains matching
-  //! inputs() in matching positions.
-  Expr* tvExpr() const {
-    return attribute(0)->as<Expr>();
-  }
-
   std::string toString(int indent_size = 0) const override;
   std::string toInlineString(int indent_size = 0) const override;
-
-  IterDomain* out() const {
-    return output(0)->as<IterDomain>();
-  }
 };
 
 //! Representation a split on an IterDomain by "factor"

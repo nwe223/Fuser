@@ -2223,8 +2223,12 @@ std::string IterDomain::toInlineString(int indent_size) const {
 
 // Returns a new IterDomain matching properties of this except for
 // is_rfactor_domain_
-IterDomain* IterDomain::cloneWithoutRFactor() const {
+IterDomain* IterDomain::cloneWithoutRFactor() {
   auto cloned = IterDomainBuilder(this).resetRfactor().build();
+
+  // Set up a unary Align op to connect this to cloned ID
+  std::vector<IterDomain*> inputs = {this};
+  IrBuilder::create<Align>(container(), cloned, inputs);
 
   return cloned;
 }
@@ -3239,14 +3243,12 @@ void TensorDomain::setAllocationDomain(
 Align::Align(
     IrBuilderPasskey passkey,
     IterDomain* outer,
-    std::vector<IterDomain*> inputs,
-    Expr* tv_expr)
+    const std::vector<IterDomain*>& inputs)
     : Expr(passkey) {
   addOutput(outer);
   for (auto in : inputs) {
     addInput(in);
   }
-  addAttribute(tv_expr);
 }
 
 std::string Align::toString(int indent_size) const {

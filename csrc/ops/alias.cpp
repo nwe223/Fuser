@@ -106,7 +106,11 @@ TensorView* reshape(TensorView* inp_tv, const std::vector<Val*>& new_sizes) {
     return static_reshape_output;
   }
 
-  auto root_domain = ops::newOutputDomain({inp_tv}, inp_tv->dtype());
+  // NOTE: This does not create Align ops connecting input IDs to output IDs.
+  // That means symbolic reshapes are points where the IterDomain subgraph is
+  // disconnected. However, during concretization, a static reshape will be
+  // performed, which does connect the IterDomains between input and output.
+  auto root_domain = ops::newOutputDomain({inp_tv}, false);
 
   // Create placeholder rfactor domain. Note it's not connected with the root
   // domain.

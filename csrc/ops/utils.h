@@ -31,9 +31,13 @@ Val* newScalar(ValType vtype, DataType dtype);
 
 IterType promoteIterType(IterType type1, IterType type2);
 
+//! Create a new tensor domain representing the output of an expression using
+//! default rules for aligning IterDomains. If `create_align_ops` is true, Align
+//! expression objects will be created so that the maybeRFactor IterDomains of
+//! provided vals are marked as producers of the returned IterDomains.
 std::vector<IterDomain*> newOutputDomain(
     const std::vector<Val*>& vals,
-    DataType dtype);
+    bool create_align_ops = true);
 
 TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype);
 

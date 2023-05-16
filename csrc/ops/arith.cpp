@@ -627,7 +627,6 @@ Val* binaryOp(BinaryOpType type, Val* v1, Val* v2, DataType common_dtype) {
   } else {
     out = ops::newScalar(out_vtype, out_dtype);
   }
-  IrBuilder::create<BinaryOp>(type, out, vals[0], vals[1]);
   return out;
 }
 
