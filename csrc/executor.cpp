@@ -184,6 +184,10 @@ void FusionExecutor::compileFusion(
     CompileParams compile_params) {
   FUSER_PERF_SCOPE("compileFusion");
 
+  if (getenv("NVFUSER_NO_ZERO")) {
+    compile_params.enable_magic_zero = false;
+  }
+
   TORCH_INTERNAL_ASSERT(
       !fusion->outputs().empty(), "No output found for this kernel, aborting.");
 
