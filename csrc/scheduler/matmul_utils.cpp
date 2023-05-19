@@ -387,7 +387,7 @@ std::string checkMatmulType(Fusion* fusion, const MmaOp* mma_expr) {
       if (tv->hasBroadcast()) {
         return "Fusion output TV has broadcast domain";
       }
-      if (tv->sameAs(mma_output)) {
+      if (tv == mma_output) {
         if (!tv->hasReduction()) {
           return "Fusion output TV has no reduction domain";
         }

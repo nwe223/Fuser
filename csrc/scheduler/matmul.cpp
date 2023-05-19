@@ -461,25 +461,27 @@ void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
       outputs[0]->isA<TensorView>(),
       "fusion's output is not an instance of TensorView class");
 
-  {
-    const auto mma_ops = ir_utils::getMmaOps(fusion);
-    TORCH_INTERNAL_ASSERT(
-        mma_ops.size() == 1,
-        "scheduleMatmul supports fusion with single mma op in definition, got ",
-        mma_ops.size());
-    TORCH_INTERNAL_ASSERT(
-        mma_ops.front()->layout().has_value(),
-        "fusion mma op has undefined input layout");
-  }
+  const auto mma_ops = ir_utils::getMmaOps(fusion);
+  TORCH_INTERNAL_ASSERT(
+      mma_ops.size() == 1,
+      "scheduleMatmul supports fusion with single mma op in definition, got ",
+      mma_ops.size());
+  TORCH_INTERNAL_ASSERT(
+      mma_ops.front()->layout().has_value(),
+      "fusion mma op has undefined input layout");
 
   TensorView* a = inputs[0]->as<TensorView>();
   TensorView* b = inputs[1]->as<TensorView>();
   TensorView* c = outputs[0]->as<TensorView>();
 
   // Collect mma swizzle info
-  auto mma = ir_utils::getMmaOps(fusion).front();
-  TORCH_INTERNAL_ASSERT(mma->layout(), "mma op layout is not initialized");
-  const auto layout = mma->layout().value();
+  auto mma = mma_ops.front();
+
+  // Note: additional temp variable defined to satify clang-tidy requirements
+  const auto layout_opt = mma->layout();
+  TORCH_INTERNAL_ASSERT(layout_opt, "mma op layout is not initialized");
+  const auto layout = layout_opt.value();
+
   auto mma_builder =
       MmaBuilder(params.mma_macro, params.tile_sizes).layout(layout);
   const auto& gemm_tile = params.tile_sizes;

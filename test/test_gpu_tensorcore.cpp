@@ -46,7 +46,6 @@
 
 #include <algorithm>
 #include <iostream>
-#include "c10/core/ScalarType.h"
 #include "dispatch.h"
 #include "ir_builder.h"
 #include "ops/arith.h"
@@ -3398,7 +3397,7 @@ TEST_F(NVFuserTest, FusionMatmulSegmenterBasicMatmulStrictCheckTT_CUDA) {
   TORCH_CHECK(
       MatmulLayout::TN ==
           ir_utils::getMmaOps(fusion.get()).front()->layout().value(),
-      "input layout from test and MmaOp do not match");
+      "the MmaOp layout of Ampere MMA must always be TN");
 
   at::manual_seed(0);
 
@@ -3450,7 +3449,7 @@ TEST_F(NVFuserTest, FusionMatmulSegmenterBasicMatmulRelaxedCheck_CUDA) {
     TORCH_CHECK(
         MatmulLayout::TN ==
             ir_utils::getMmaOps(fusion.get()).front()->layout().value(),
-        "input layout from test and MmaOp do not match");
+        "the MmaOp layout of Ampere MMA must always be TN");
 
     at::manual_seed(0);
 
@@ -3481,12 +3480,12 @@ TEST_F(NVFuserTest, FusionMatmulSegmenterBasicMatmulRelaxedCheck_CUDA) {
 // Matmul test that relies on segmenter for 'C = float2half(A x B)' fusion, for
 //   Ampere
 TEST_F(NVFuserTest, FusionMatmulSegmenterEpilogueOutputCast_CUDA) {
-  NVFUSER_TEST_CUDA_ARCH_RANGE_GUARD(8, 0, 8, 9);
+  NVFUSER_TEST_CUDA_ARCH_RANGE_GUARD(8, 0, 9, 0);
   const auto layout = MatmulLayout::TT;
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
-  // alpha - s0, A - tv 0, B - tv1
+  // A - tv 0, B - tv1
   auto tv0 = makeContigTensor(2, DataType::Half);
   auto tv1 = makeContigTensor(2, DataType::Half);
 
@@ -3506,7 +3505,7 @@ TEST_F(NVFuserTest, FusionMatmulSegmenterEpilogueOutputCast_CUDA) {
   TORCH_CHECK(
       MatmulLayout::TN ==
           ir_utils::getMmaOps(fusion.get()).front()->layout().value(),
-      "input layout from test and MmaOp do not match");
+      "the MmaOp layout of Ampere MMA must always be TN");
 
   FusionExecutorCache executor_cache(std::move(fusion));
 
@@ -3530,7 +3529,7 @@ TEST_F(NVFuserTest, FusionMatmulSegmenterEpilogueOutputCast_CUDA) {
 // Matmul test that relies on segmenter for 'C = alpha * (A x B)' fusion, for
 //   Ampere
 TEST_F(NVFuserTest, FusionMatmulSegmenterEpilogueAlpha_CUDA) {
-  NVFUSER_TEST_CUDA_ARCH_RANGE_GUARD(8, 0, 8, 9);
+  NVFUSER_TEST_CUDA_ARCH_RANGE_GUARD(8, 0, 9, 0);
   const auto layout = MatmulLayout::TT;
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
@@ -3557,7 +3556,7 @@ TEST_F(NVFuserTest, FusionMatmulSegmenterEpilogueAlpha_CUDA) {
   TORCH_CHECK(
       MatmulLayout::TN ==
           ir_utils::getMmaOps(fusion.get()).front()->layout().value(),
-      "input layout from test and MmaOp do not match");
+      "the MmaOp layout of Ampere MMA must always be TN");
 
   FusionExecutorCache executor_cache(std::move(fusion));
 
@@ -3582,12 +3581,12 @@ TEST_F(NVFuserTest, FusionMatmulSegmenterEpilogueAlpha_CUDA) {
 // Matmul test that relies on segmenter for 'C = relu(A x B)' fusion, for
 //   Ampere
 TEST_F(NVFuserTest, FusionMatmulSegmenterEpilogueRelu_CUDA) {
-  NVFUSER_TEST_CUDA_ARCH_RANGE_GUARD(8, 0, 8, 9);
+  NVFUSER_TEST_CUDA_ARCH_RANGE_GUARD(8, 0, 9, 0);
   const auto layout = MatmulLayout::TT;
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
-  // alpha - s0, A - tv 0, B - tv1
+  // A - tv 0, B - tv1
   auto tv0 = makeContigTensor(2, DataType::Half);
   auto tv1 = makeContigTensor(2, DataType::Half);
 
@@ -3607,7 +3606,7 @@ TEST_F(NVFuserTest, FusionMatmulSegmenterEpilogueRelu_CUDA) {
   TORCH_CHECK(
       MatmulLayout::TN ==
           ir_utils::getMmaOps(fusion.get()).front()->layout().value(),
-      "input layout from test and MmaOp do not match");
+      "the MmaOp layout of Ampere MMA must always be TN");
 
   FusionExecutorCache executor_cache(std::move(fusion));
 
@@ -3632,12 +3631,12 @@ TEST_F(NVFuserTest, FusionMatmulSegmenterEpilogueRelu_CUDA) {
 // Matmul test that relies on segmenter for 'C = relu(A x B)' fusion, for
 //   Ampere
 TEST_F(NVFuserTest, FusionMatmulSegmenterEpilogueGelu_CUDA) {
-  NVFUSER_TEST_CUDA_ARCH_RANGE_GUARD(8, 0, 8, 9);
+  NVFUSER_TEST_CUDA_ARCH_RANGE_GUARD(8, 0, 9, 0);
   const auto layout = MatmulLayout::TT;
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
-  // alpha - s0, A - tv 0, B - tv1
+  // A - tv 0, B - tv1
   auto tv0 = makeContigTensor(2, DataType::Half);
   auto tv1 = makeContigTensor(2, DataType::Half);
 
@@ -3657,7 +3656,7 @@ TEST_F(NVFuserTest, FusionMatmulSegmenterEpilogueGelu_CUDA) {
   TORCH_CHECK(
       MatmulLayout::TN ==
           ir_utils::getMmaOps(fusion.get()).front()->layout().value(),
-      "input layout from test and MmaOp do not match");
+      "the MmaOp layout of Ampere MMA must always be TN");
 
   FusionExecutorCache executor_cache(std::move(fusion));
 
@@ -3681,7 +3680,7 @@ TEST_F(NVFuserTest, FusionMatmulSegmenterEpilogueGelu_CUDA) {
 
 // MMA and alpha unit test, for Ampere TN
 TEST_F(NVFuserTest, FusionAmpereMMATNAlpha_CUDA) {
-  NVFUSER_TEST_CUDA_ARCH_GUARD(8, 0);
+  NVFUSER_TEST_CUDA_ARCH_RANGE_GUARD(8, 0, 9, 0);
 
   Fusion fusion;
   FusionGuard fg(&fusion);
