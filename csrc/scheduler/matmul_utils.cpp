@@ -193,7 +193,7 @@ std::optional<ProblemShape> getProblemShape(
   const auto& fusion_inputs = fusion->inputs();
   const auto& fusion_outputs = fusion->outputs();
   const auto& mma_inputs = mma_expr->inputs();
-  const auto& mma_outputs = mma_expr->outputs();
+  const auto mma_output = mma_expr->out();
 
   // It is an unsupported fusion if
   // - there are more than one fusion input TensorViews (producers)
@@ -221,7 +221,16 @@ std::optional<ProblemShape> getProblemShape(
         tvs.push_back(path.front());
       }
     }
-    return (tvs.size() == 1) ? tvs[0] : nullptr;
+    if (tvs.empty()) {
+      return nullptr;
+    }
+    // If there is more than a single path then vector has instances of
+    // same TV
+    //   e.g. Gelu and detecting the output of fusion
+    if (!std::equal(tvs.begin(), tvs.end(), tvs.begin())) {
+      return nullptr;
+    }
+    return tvs.front();
   };
 
   const auto* tv_input_A =
@@ -237,7 +246,7 @@ std::optional<ProblemShape> getProblemShape(
   }
 
   const auto* tv_output =
-      getKeyTvFromPathBetween({mma_outputs[0]}, fusion_outputs);
+      getKeyTvFromPathBetween({mma_output}, fusion_outputs);
   if (nullptr == tv_output) {
     return std::nullopt;
   }

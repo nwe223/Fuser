@@ -3627,8 +3627,8 @@ TEST_F(NVFuserTest, FusionMatmulSegmenterEpilogueRelu_CUDA) {
   TORCH_CHECK(outputs[0].allclose(tref, 0.001, 0.001));
 }
 
-#if 0
-// Matmul test that relies on segmenter for 'C = relu(A x B)' fusion, for
+#if 1
+// Matmul test that relies on segmenter for 'C = gelu(A x B)' fusion, for
 //   Ampere
 TEST_F(NVFuserTest, FusionMatmulSegmenterEpilogueGelu_CUDA) {
   NVFUSER_TEST_CUDA_ARCH_RANGE_GUARD(8, 0, 9, 0);
@@ -3658,6 +3658,8 @@ TEST_F(NVFuserTest, FusionMatmulSegmenterEpilogueGelu_CUDA) {
           ir_utils::getMmaOps(fusion.get()).front()->layout().value(),
       "the MmaOp layout of Ampere MMA must always be TN");
 
+  fusion->printMath();
+
   FusionExecutorCache executor_cache(std::move(fusion));
 
   const int M = 504, N = 136, K = 1024;
@@ -3669,6 +3671,7 @@ TEST_F(NVFuserTest, FusionMatmulSegmenterEpilogueGelu_CUDA) {
   at::Tensor tref = at::gelu(t2).to(at::kFloat);
 
   auto outputs = executor_cache.runFusionWithInputs({t0, t1});
+
 
   TORCH_CHECK(
       !executor_cache.getMostRecentKernelRuntime()->isSegmented(),
