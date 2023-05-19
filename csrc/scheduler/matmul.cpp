@@ -14,15 +14,13 @@
 // NOTE: included to avoid compilation error caused by missing destructor in
 // 'SchedulerRuntimeInfo'
 #include <executor_utils.h>
-#include "c10/util/Exception.h"
-#include "ir_interface_nodes.h"
 
 namespace nvfuser {
 
 namespace {
 
 // Returns true if given number is power of 2
-constexpr bool isPowOf2(int x) {
+constexpr bool isPowOf2(int64_t x) {
   return x > 1 && (x & (x - 1)) == 0;
 }
 
@@ -99,8 +97,8 @@ void prologSwizzle(TensorView* shared_mem_tv, const MatmulParams& params) {
     TORCH_INTERNAL_ASSERT(dataTypeSize(*shared_mem_tv->getDataType()) == 2);
 
     // ldmatrix loads a ldmatrix_rows x ldmatrix_cols = 8 x 8 matrix each time,
-    constexpr int ldmatrix_rows = 8;
-    constexpr int ldmatrix_cols = 8;
+    constexpr int64_t ldmatrix_rows = 8;
+    constexpr int64_t ldmatrix_cols = 8;
 
     // Column size of the tile needs to be multiples of 8 for ldmatrix to work.
     TORCH_INTERNAL_ASSERT(
@@ -135,8 +133,8 @@ void prologSwizzle(TensorView* shared_mem_tv, const MatmulParams& params) {
      * and 6 both belong to word 1.
      */
 
-    constexpr int smem_bytes_per_word = 4;
-    constexpr int smem_banks = 32;
+    constexpr int64_t smem_bytes_per_word = 4;
+    constexpr int64_t smem_banks = 32;
 
     /* but here, for our convenience, because ldmatrix always use vectorized
      * access of 8 items = 16 bytes = 4 words, we further group words into
@@ -149,11 +147,11 @@ void prologSwizzle(TensorView* shared_mem_tv, const MatmulParams& params) {
      * has 8 rows, and each row has exactly one unit.
      */
 
-    constexpr int items_per_unit = ldmatrix_cols;
-    constexpr int bytes_per_unit =
+    constexpr int64_t items_per_unit = ldmatrix_cols;
+    constexpr int64_t bytes_per_unit =
         items_per_unit * primDataTypeSize(DataType::Half);
-    constexpr int words_per_unit = bytes_per_unit / smem_bytes_per_word;
-    constexpr int num_megabanks = smem_banks / words_per_unit;
+    constexpr int64_t words_per_unit = bytes_per_unit / smem_bytes_per_word;
+    constexpr int64_t num_megabanks = smem_banks / words_per_unit;
 
     /* In the following example, each CTA tile contains 2 rows and 3 colums of
      * matrices, each 8x8 size:
@@ -168,7 +166,7 @@ void prologSwizzle(TensorView* shared_mem_tv, const MatmulParams& params) {
      */
 
     // number of units per row
-    int row_stride = (int)(tile_size_y / (int64_t)items_per_unit);
+    int64_t row_stride = tile_size_y / items_per_unit;
 
     /* So the bank conflicting problem is now converted to the following game:
      *   I have a clock that has one pointer and `num_megabanks` ticks. I start
@@ -199,7 +197,7 @@ void prologSwizzle(TensorView* shared_mem_tv, const MatmulParams& params) {
     // row_stride in Z/nZ, where n is num_megabanks:
     // assert(row_stride >= 0);
     // assert(num_megabanks >= 0);
-    int row_stride_znz = row_stride % num_megabanks;
+    int64_t row_stride_znz = row_stride % num_megabanks;
 
     /* Consider the following function in Z/nZ:
      *   f(i; init) = init + i * stride
@@ -255,7 +253,7 @@ void prologSwizzle(TensorView* shared_mem_tv, const MatmulParams& params) {
      * not repeat, that is: there is no bank conflict.
      */
 
-    int g = std::gcd(num_megabanks, row_stride_znz);
+    int64_t g = std::gcd(num_megabanks, row_stride_znz);
     if (g == 1) {
       return; // No need to swizzle in this case.
     }
@@ -289,7 +287,7 @@ void prologSwizzle(TensorView* shared_mem_tv, const MatmulParams& params) {
      *   (x => occupied, _ => unoccupied)
      */
 
-    int repeated_pattern_size = num_megabanks / g;
+    int64_t repeated_pattern_size = num_megabanks / g;
 
     if (repeated_pattern_size >= ldmatrix_rows) {
       return; // No need to swizzle in this case.
@@ -368,9 +366,9 @@ void prologSwizzle(TensorView* shared_mem_tv, const MatmulParams& params) {
     shared_mem_tv->split(-3, repeated_pattern_size);
     //     -5        -4      -3       -2         -1
     // [matrix id, repeat, pattern, matrix id, matrix]
-    int swizzle_period = ldmatrix_rows / repeated_pattern_size;
+    int64_t swizzle_period = ldmatrix_rows / repeated_pattern_size;
     TORCH_INTERNAL_ASSERT(
-        tile_size_y % (int64_t)(swizzle_period * ldmatrix_cols) == 0,
+        tile_size_y % (swizzle_period * ldmatrix_cols) == 0,
         "need aperiodic swizzle config for tile size ",
         tile_size_x,
         "x",
