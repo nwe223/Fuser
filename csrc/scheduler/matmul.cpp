@@ -524,6 +524,13 @@ void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
   // Setup accumulator register.
   auto cc = c->cacheBefore();
 
+  // Setup output smem buffer
+  // cc -> c_smem -> c
+  TensorView* c_smem = nullptr;
+  if (params.has_epilogue) {
+    c_smem = c->cacheBefore();
+  }
+
   // Get the input to the mma op.
   auto mma = cc->definition()->as<MmaOp>();
   auto ab = mma->inA()->as<TensorView>();
@@ -652,6 +659,17 @@ void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
 
   // Schedule warp tile
   mma_utils::scheduleWarpTileWithReduction(cc, gemm_tile);
+  //  0   1  2  3   4   5   6   7  8  9  10
+  // [Mo  No Ko Kw Mwo Nwo Mwi Nwi Mi, Ni, Ki]
+  // e.g. T6_l[ iS25{( ceilDiv(i0, 128) )}, iS27{( ceilDiv(i4, 128) )}, rS29{(
+  // ceilDiv(i2, 32) )}, rS83{( ceilDiv(32, 16) )}, iS75{( ceilDiv(128, 64) )},
+  // iS77{( ceilDiv(128, 64) )}, iS79{( ceilDiv(64, 16) )}, iS81{( ceilDiv(64,
+  // 8) )}, iS80{16}, iS82{8}, rS84{16} ] Move the Mw up for epilog:
+  if (params.has_epilogue) {
+    cc->reorder({{4, 5}, {5, 6}, {6, 4}});
+    //  0   1  2  3   4   5   6   7  8  9  10
+    // [Mo No Ko  Kw Mw  Mwo  Nwo Nw (Mi Ni Ki)]
+  }
 
   // Propagate warp tile to main loop and epilog/output tvs
   scheduler_utils::BoundedDirectionalTransformPropagator::bothWays(
@@ -662,7 +680,9 @@ void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
   // ------------------------------------------------------------------
   scheduleProlog(acw_smem, params);
   scheduleProlog(bcw_smem, params);
-
+  if (params.has_epilogue) {
+    c_smem->setMemoryType(MemoryType::Shared);
+  }
   // Add mma swizzle:
   //   TODO: this section goes to a separate matmul util,
   //   and needs more configurability.
@@ -718,8 +738,14 @@ void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
           false, "Invalid TileRasterizationOrder passed to Matmul scheduler");
   }
 
-  cc->axis(4)->parallelize(ParallelType::TIDz);
-  cc->axis(5)->parallelize(ParallelType::TIDy);
+  // iS75{( ceilDiv(128, 64) )}, iS77{( ceilDiv(128, 64) )}
+  if (params.has_epilogue) {
+    cc->axis(5)->parallelize(ParallelType::TIDz);
+    cc->axis(6)->parallelize(ParallelType::TIDy);
+  } else {
+    cc->axis(4)->parallelize(ParallelType::TIDz);
+    cc->axis(5)->parallelize(ParallelType::TIDy);
+  }
 
   scheduler_utils::parallelizeAllLike(
       cc,
@@ -727,8 +753,43 @@ void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
       {acr, bcr, ab, bb, a, b},
       {ParallelType::TIDy, ParallelType::TIDz});
 
+  auto output_buffer = params.has_epilogue ? c_smem : c;
+  scheduler_utils::BoundedDirectionalTransformPropagator::forward(
+      cc,
+      -1,
+      {output_buffer},
+      scheduler_utils::BoundedDirectionalTransformPropagator::Options()
+          .propagateParallelType()
+          .propagateToBoundary());
+
+  // Epilog schedule (To be built out):
+  if (params.has_epilogue) {
+    // T7_s[ iblockIdx.x67{( ceilDiv(i0, 128) )}, iblockIdx.y69{( ceilDiv(i4,
+    // 128) )}, iS119{( ceilDiv(64, 16) )}, ithreadIdx.z117{( ceilDiv(128, 64)
+    // )}, ithreadIdx.y121{( ceilDiv(128, 64) )}, iS123{( ceilDiv(64, 8) )},
+    // iS194{( ceilDiv(16, 8) )}, ithreadIdx.x198{( 8 * ( ceilDiv(8, 2) ) )},
+    // iS197{2} ]
+    scheduler_utils::BoundedDirectionalTransformPropagator::forward(
+        c_smem,
+        4,
+        {c},
+        scheduler_utils::BoundedDirectionalTransformPropagator::Options()
+            .propagateParallelType()
+            .propagateToBoundary());
+    c->reorder({{-1, -2}, {-2, -1}});
+    c->split(-2, 2);
+    c->split(-1, 4);
+    // [8, 2, 32, 4]
+    c->axis(-3)->parallelize(ParallelType::TIDy);
+    c->axis(-2)->parallelize(ParallelType::TIDx);
+    c->axis(-1)->parallelize(ParallelType::Vectorize);
+    c_smem->axis(-1)->parallelize(ParallelType::Vectorize);
+  } else {
+    // Always vector
+    c->axis(-1)->parallelize(ParallelType::Vectorize);
+  }
   // auto inline for all tensors except register tensors and output tensor
-  inlineMost(ir_utils::allTvsExcept(fusion, {acr, bcr, ab, bb, c}));
+  inlineMost(ir_utils::allTvsExcept(fusion, {acr, bcr, ab, bb, c_smem, c}));
 
   // if auto inline, will inline to position-7, leads to performance regression
   inlineSelectedAt({acr, bcr, ab, bb}, cc, 6);
@@ -754,16 +815,6 @@ void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
     acr->doubleBuffer();
     bcr->doubleBuffer();
   }
-
-  scheduler_utils::BoundedDirectionalTransformPropagator::forward(
-      cc,
-      -1,
-      {c},
-      scheduler_utils::BoundedDirectionalTransformPropagator::Options()
-          .propagateParallelType()
-          .propagateToBoundary());
-
-  c->axis(-1)->parallelize(ParallelType::Vectorize);
 
   if (params.double_buffer_options.double_buffer_smem_read &&
       params.double_buffer_options.double_buffer_smem_write) {
