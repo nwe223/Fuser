@@ -85,8 +85,8 @@ void prologSwizzle(TensorView* shared_mem_tv, const MatmulParams& params) {
   check_concrete_static_dim(shared_mem_tv->axis(-1));
 
   // Extract the constant sizes of the swizzled tile
-  const auto tile_size_x = shared_mem_tv->axis(-2)->extent()->evaluateInt();
-  const auto tile_size_y = shared_mem_tv->axis(-1)->extent()->evaluateInt();
+  const int tile_size_x = (int)shared_mem_tv->axis(-2)->extent()->evaluateInt();
+  const int tile_size_y = (int)shared_mem_tv->axis(-1)->extent()->evaluateInt();
 
   if (isTuring(params.mma_macro) || isAmpere(params.mma_macro)) {
     // TODO: right now, we are assuming ldmatrix access, which only supports
@@ -464,16 +464,21 @@ void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
       mma_ops.size() == 1,
       "scheduleMatmul supports fusion with single mma op in definition, got ",
       mma_ops.size());
-  TORCH_INTERNAL_ASSERT(
-      mma_ops.front()->layout().has_value(),
-      "fusion mma op has undefined input layout");
 
   TensorView* a = inputs[0]->as<TensorView>();
   TensorView* b = inputs[1]->as<TensorView>();
   TensorView* c = outputs[0]->as<TensorView>();
 
   // Collect mma swizzle info
-  const auto layout = mma_ops.front()->layout().value();
+  // initilized value is just to make clangtidy happy
+  MmaOptions::MmaLayout layout = MmaOptions::MmaLayout::NT;
+  const auto& layout_opt = mma_ops.front()->layout();
+  if (layout_opt.has_value()) {
+    layout = layout_opt.value();
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        layout_opt.has_value(), "fusion mma op has undefined input layout");
+  }
   auto mma_builder =
       MmaBuilder(params.mma_macro, params.tile_sizes).layout(layout);
   const auto& gemm_tile = params.tile_sizes;
