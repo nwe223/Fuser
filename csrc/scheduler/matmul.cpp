@@ -56,6 +56,18 @@ void moveInnerBroadcastLeft(TensorView* tv, int number_of_inner_pos = 3) {
   tv->reorder(order_map);
 }
 
+// Utility to check concrete static size:
+auto check_concrete_static_dim = [](IterDomain* id) {
+  TORCH_INTERNAL_ASSERT(
+      !id->isBroadcast() && !id->isReduction(),
+      "no support on reduction or broadcast dims, but get ",
+      id->toString());
+  TORCH_INTERNAL_ASSERT(
+      id->extent()->isConstInt(),
+      "swizzled dimensions need to be statically, but get ",
+      id->toString());
+};
+
 //! Automatically generates the shared memory swizzled data layout
 //!  for matmul mainloop.
 //! The shared mem datalayout is always 2D currently, and this utility
@@ -64,19 +76,6 @@ void moveInnerBroadcastLeft(TensorView* tv, int number_of_inner_pos = 3) {
 void prologSwizzle(TensorView* shared_mem_tv, const MatmulParams& params) {
   // Check that the innermost 2 dimensions are concrete and static
   //  sized so that the swizzle function can be defined.
-
-  // Utility to check concrete static size:
-  auto check_concrete_static_dim = [](IterDomain* id) {
-    TORCH_INTERNAL_ASSERT(
-        !id->isBroadcast() && !id->isReduction(),
-        "no support on reduction or broadcast dims, but get ",
-        id->toString());
-    TORCH_INTERNAL_ASSERT(
-        id->extent()->isConstInt(),
-        "swizzled dimensions need to be statically, but get ",
-        id->toString());
-  };
-
   TORCH_INTERNAL_ASSERT(
       shared_mem_tv->nDims() >= 2,
       "At least 2D input needed for swizzling, but get ",
@@ -152,6 +151,7 @@ void prologSwizzle(TensorView* shared_mem_tv, const MatmulParams& params) {
         items_per_unit * primDataTypeSize(DataType::Half);
     constexpr int words_per_unit = bytes_per_unit / smem_bytes_per_word;
     constexpr int num_megabanks = smem_banks / words_per_unit;
+  std::cout << "words_per_unit " << words_per_unit << " num_megabanks " << num_megabanks<< std::endl;
 
     /* In the following example, each CTA tile contains 2 rows and 3 colums of
      * matrices, each 8x8 size:
@@ -254,6 +254,7 @@ void prologSwizzle(TensorView* shared_mem_tv, const MatmulParams& params) {
      */
 
     int g = std::gcd(num_megabanks, row_stride_znz);
+  std::cout << "row_stride " << row_stride << " g " << g<< std::endl;
     if (g == 1) {
       return; // No need to swizzle in this case.
     }
@@ -381,6 +382,7 @@ void prologSwizzle(TensorView* shared_mem_tv, const MatmulParams& params) {
     //     -6        -5      -4            -3           -2         -1
     // [matrix id, repeat, pattern, matrix id outer, pattern id, matrix]
     // swizzle repeat with pattern id to make repeat no longer repeat
+  std::cout << "before swizzle " << shared_mem_tv->toString() << std::endl;
     if (isPowOf2(swizzle_period)) {
       shared_mem_tv->swizzle(Swizzle2DType::XOR, -5, -2);
     } else {
@@ -411,6 +413,7 @@ void prologSwizzle(TensorView* shared_mem_tv, const MatmulParams& params) {
 //! 2. Coalesce and vectorize the read write schedule.
 void scheduleProlog(TensorView* shared_mem_tv, const MatmulParams& params) {
   shared_mem_tv->setMemoryType(MemoryType::Shared);
+  std::cout << "\nbefore orderTiledConcreteIdAsRoot " << shared_mem_tv->toString() << std::endl;
 
   mma_utils::orderTiledConcreteIdAsRoot(shared_mem_tv);
 
@@ -436,6 +439,111 @@ void scheduleProlog(TensorView* shared_mem_tv, const MatmulParams& params) {
           .propagateParallelType());
 }
 
+
+void epilogSwizzle(TensorView* shared_mem_tv, const MatmulParams& params) {
+  check_concrete_static_dim(shared_mem_tv->axis(-2));
+  check_concrete_static_dim(shared_mem_tv->axis(-1));  
+  // Extract the constant sizes of the swizzled tile, e.g. 128 x 128
+  const int tile_size_x = (int)shared_mem_tv->axis(-2)->extent()->evaluateInt();
+  const int tile_size_y = (int)shared_mem_tv->axis(-1)->extent()->evaluateInt();
+  std::cout << "tile_size_x " << tile_size_x  << " tile_size_y " << tile_size_y << std::endl;
+  constexpr int ldmatrix_rows = 8;
+  constexpr int ldmatrix_cols = 8;
+  constexpr int smem_bytes_per_word = 4;
+  constexpr int smem_banks = 32;
+  // Threads in a warp is organized as 8 rows x 4 columns
+  // Each thread vectorized write 2 items, so 8 items per row
+  //--0--1--2--3
+  //--4--5--6--7
+  //--8--9--10-11
+  //--12-13-14-15
+  //--16-17-18-19
+  //--20-21-22-23
+  //--24-25-26-27
+  //--28-29-30-31
+  constexpr int items_per_unit = ldmatrix_cols;
+  constexpr int bytes_per_unit =
+      items_per_unit * primDataTypeSize(DataType::Float);
+  constexpr int words_per_unit = bytes_per_unit / smem_bytes_per_word;
+  constexpr int num_megabanks = smem_banks / words_per_unit;
+  std::cout << "words_per_unit " << words_per_unit << " num_megabanks " << num_megabanks<< std::endl;
+
+  int row_stride = tile_size_y / items_per_unit;
+  int row_stride_znz = row_stride % num_megabanks;
+  int g = std::gcd(num_megabanks, row_stride_znz);
+  std::cout << "row_stride " << row_stride << " row_stride_znz " << row_stride_znz << " g " << g<< std::endl;
+
+  int repeated_pattern_size = num_megabanks / g;
+  shared_mem_tv->split(-2, ldmatrix_rows);
+  TORCH_INTERNAL_ASSERT(
+      tile_size_y % ldmatrix_cols == 0, "Partial matrices not supported");
+  shared_mem_tv->split(-1, ldmatrix_cols);
+  //     -4        -3      -2         -1
+  // [matrix id, matrix, matrix id, matrix]
+  TORCH_INTERNAL_ASSERT(
+      ldmatrix_rows % repeated_pattern_size == 0,
+      "ldmatrix_rows is assumed to be a multiple of repeated_pattern_size");
+  shared_mem_tv->split(-3, repeated_pattern_size);
+  //     -5        -4      -3       -2         -1
+  // [matrix id, repeat, pattern, matrix id, matrix]
+  int swizzle_period = ldmatrix_rows / repeated_pattern_size;
+  TORCH_INTERNAL_ASSERT(
+      tile_size_y % (swizzle_period * ldmatrix_cols) == 0,
+      "need aperiodic swizzle config for tile size ",
+      tile_size_x,
+      "x",
+      tile_size_y,
+      "with units ",
+      ldmatrix_rows,
+      "x",
+      ldmatrix_cols);
+  shared_mem_tv->split(-2, swizzle_period);
+  //     -6        -5      -4            -3           -2         -1
+  // [matrix id, repeat, pattern, matrix id outer, pattern id, matrix]
+  // swizzle repeat with pattern id to make repeat no longer repeat
+  std::cout << "before swizzle " << shared_mem_tv->toString() << std::endl;
+  if (isPowOf2(swizzle_period)) {
+    shared_mem_tv->swizzle(Swizzle2DType::XOR, -5, -2);
+  } else {
+    shared_mem_tv->swizzle(Swizzle2DType::CyclicShift, -5, -2);
+  }
+
+  // Merge back the tile for subsequent vectorization scheduling
+  //  TODO: could potentially simplify away the merges
+  shared_mem_tv->merge(-6);
+  shared_mem_tv->merge(-5);
+  shared_mem_tv->merge(-3);
+  shared_mem_tv->merge(-2);  
+}
+
+void scheduleEpilog(TensorView* shared_mem_tv, const MatmulParams& params) {
+  shared_mem_tv->setMemoryType(MemoryType::Shared);
+  std::cout << "\nbefore orderTiledConcreteIdAsRoot " << shared_mem_tv->toString() << std::endl;
+  mma_utils::orderTiledConcreteIdAsRoot(shared_mem_tv);
+
+  // Swizzle the shared memory data layout
+  std::cout << "before epilogSwizzle " << shared_mem_tv->toString() << std::endl;
+  epilogSwizzle(shared_mem_tv, params);
+
+  // Assuming we are always vectorizing smem write by 128b at the moment:
+  //   TODO: would need a data-type and alignment dependent interface
+  //    to support non-vectorizable shapes.
+  //   The vectorizable width logic would be in a separate PR as the
+  //    current effort tries to focus on generating swizzles.
+  shared_mem_tv->merge(-2);
+  // mma_utils::scheduleContiguousVectorLoad(
+  //     shared_mem_tv, params.tile_sizes, 4, true);
+  std::cout << "after scheduleEpilog " << shared_mem_tv->toString() << std::endl;
+
+  // // Propagate epilog tensors
+  // // propagate down the DAG, and propagate parallel type.
+  // scheduler_utils::BoundedDirectionalTransformPropagator::forward(
+  //     shared_mem_tv,
+  //     -1,
+  //     {},
+  //     scheduler_utils::BoundedDirectionalTransformPropagator::Options()
+  //         .propagateParallelType());
+}
 } // namespace
 
 void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
@@ -678,16 +786,14 @@ void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
 
   // Propagate warp tile to main loop and epilog/output tvs
   scheduler_utils::BoundedDirectionalTransformPropagator::bothWays(
-      cc, -1, {acw_smem, bcw_smem}, {c});
+      cc, -1, {acw_smem, bcw_smem}, {c_smem});
 
   // Schedule prolog:
   //   TODO: this section needs more configurability.
   // ------------------------------------------------------------------
   scheduleProlog(acw_smem, params);
   scheduleProlog(bcw_smem, params);
-  if (params.has_epilogue) {
-    c_smem->setMemoryType(MemoryType::Shared);
-  }
+
   // Add mma swizzle:
   //   TODO: this section goes to a separate matmul util,
   //   and needs more configurability.
@@ -752,6 +858,9 @@ void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
     cc->axis(5)->parallelize(ParallelType::TIDy);
   }
 
+
+    scheduleEpilog(c_smem, params);
+
   scheduler_utils::parallelizeAllLike(
       cc,
       -1,
@@ -774,6 +883,7 @@ void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
     // )}, ithreadIdx.y121{( ceilDiv(128, 64) )}, iS123{( ceilDiv(64, 8) )},
     // iS194{( ceilDiv(16, 8) )}, ithreadIdx.x198{( 8 * ( ceilDiv(8, 2) ) )},
     // iS197{2} ]
+    std::cout << "after Propagator " << c_smem->toString() << std::endl;
     scheduler_utils::BoundedDirectionalTransformPropagator::forward(
         c_smem,
         4,
@@ -781,6 +891,9 @@ void scheduleMatmul(Fusion* fusion, const MatmulParams& params) {
         scheduler_utils::BoundedDirectionalTransformPropagator::Options()
             .propagateParallelType()
             .propagateToBoundary());
+    
+    std::cout << "after propa from smem c= " << c->toString() << std::endl;
+
     c->reorder({{-1, -2}, {-2, -1}});
     c->split(-2, 2);
     c->split(-1, 4);

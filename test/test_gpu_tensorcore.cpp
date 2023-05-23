@@ -3511,18 +3511,24 @@ TEST_F(NVFuserTest, FusionAmpereMatmulEpilogue_CUDA) {
     TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
 
     // check bank conflicts
-    // const std::unordered_map<const Expr*, std::pair<int, int>>& bank_conflict
-    // = getBankCo flictInfo(fe.kernel()); if(! flict.empty()){
-    //   for(auto it = bank_conflict.begin(); it != bank_conflict.end(); it++){
-    //     std::cout << "Bank conflict expression: " << it->first->toString() <<
-    //     "read confl ct= " << it->second.first << ", write conflict= " <<
-    //     it->second. econd << std::endl;
-    //   }
-    //   ASSERT_TRUE(bank_conflict.empty());
-    // }
+    const auto& bank_conflict = getBankConflictInfo(fe.kernel());
+    if (!bank_conflict.empty()) {
+      for (auto it = bank_conflict.begin(); it != bank_conflict.end(); it++) {
+        std::cout << "Bank conflict expression: " << it->first->toString()
+                  << "read conflict= " << it->second.first
+                  << ", write conflict= " << it->second.second << std::endl;
+      }
+      ASSERT_TRUE(bank_conflict.empty());
+    }
   }
 }
 
 #undef NVFUSER_TEST_CUDA_ARCH_GUARD
 
 } // namespace nvfuser
+
+
+// with swizzle:
+// Bank conflict expression: T7_s[( ( ( ( ( ( ( 128 * ( threadIdx.x / 4 ) ) + ( 2 * ( threadIdx.x % 4 ) ) ) + ( 64 * threadIdx.y ) ) + ( 8192 * threadIdx.z ) ) + ( 2048 * i277 ) ) + ( 8 * i278 ) ) + ( 1024 * i279 ) )] view( T7 )
+//    = Set( T6_l[( ( ( 32 * i277 ) + ( 2 * i278 ) ) + ( 16 * i279 ) )] view( T6 ) )
+// read conflict= 0, write conflict= 4
