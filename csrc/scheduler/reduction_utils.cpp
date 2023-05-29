@@ -737,7 +737,8 @@ class PersistentBufferProjector {
       for (auto buffer_i : c10::irange(persistent_buffers.size())) {
         auto buffer = persistent_buffers[buffer_i];
         const auto& producers = ir_utils::producerTvsOf(buffer);
-        if (producers.size() && std::all_of(producers.begin(), producers.end(), [&](auto producer) {
+        if (producers.size() &&
+            std::all_of(producers.begin(), producers.end(), [&](auto producer) {
               return persistent_buffer_set.count(producer) > 0;
             })) {
           projectToInputOrImmediatePersistentProducer(
