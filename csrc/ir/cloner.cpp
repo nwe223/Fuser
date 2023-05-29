@@ -16,6 +16,7 @@ namespace nvfuser {
 IrCloner::IrCloner(IrContainer* container) : ir_container_(container) {}
 
 Statement* IrCloner::clone(const Statement* statement) {
+  // std::cout << "clone statement= " << statement->toString() << std::endl;
   if (statement == nullptr) {
     return nullptr;
   }
@@ -44,10 +45,11 @@ void IrCloner::registerClone(const Statement* src, Statement* clone) {
 }
 
 Statement* IrCloner::handle(const Statement* s) {
+  // std::cout << "clone Statement: " << s->toString() << std::endl;
   return s->clone(this);
 }
 
-TensorView* RecomputeTv::recompute(TensorView* tv) {
+TensorView* RecomputeTv::recompute(TensorView* tv, const std::vector<Val*>& from) {
   FusionGuard fg(tv->fusion());
 
   // Disallow recomputation of inputs or outputs. User would have to be aware of
@@ -57,15 +59,21 @@ TensorView* RecomputeTv::recompute(TensorView* tv) {
       "Cannot recompute buffers that are inputs of the fusion.");
 
   // Grab all the expressions used to generate the TensorView
-  auto exprs = StmtSort::getExprs(tv->fusion(), {tv}, false, false);
+  auto exprs = StmtSort::getExprsBetween(tv->fusion(), from, {tv}, false, false);
 
   // Run the replicator
   RecomputeTv replicator(tv->fusion());
+
+  // Add inputs to the clones map to prevent cloning them.
+  for (const auto persistent : from) {
+    replicator.clones_map_[persistent] = persistent;
+  }
 
   // Clone the expressions
   // clang-tidy: Call to virtual method 'RecomputeTv::handle' during
   // construction bypasses virtual dispatch
   for (auto expr : exprs) {
+    std::cout << "handle expr: " << expr->toString() << std::endl;
     replicator.handle(expr);
   }
 
@@ -101,16 +109,19 @@ Statement* RecomputeTv::handle(const Statement* s) {
   if (s->isA<TensorDomain>()) {
     return handle(s->as<TensorDomain>());
   }
+    // std::cout << "clone Statement: " << s->toString() << std::endl;
   return s->clone(this);
 }
 
 Statement* RecomputeTv::handle(const TensorDomain* td) {
   // Make sure to recompute the history of the iteration domains, explicitly go
   // through the expressions and send them to IrCloner.
+    // std::cout << "handle TensorDomain: " << td->toString() << std::endl;
   auto exprs =
       StmtSort::getExprs(fusion_, {td->leaf().begin(), td->leaf().end()});
 
   for (auto expr : exprs) {
+    // std::cout << "handle expr2: " << expr->toString() << std::endl;
     IrCloner::handle(expr);
   }
   return IrCloner::handle(td);

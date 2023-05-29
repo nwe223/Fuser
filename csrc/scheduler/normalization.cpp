@@ -1454,7 +1454,12 @@ void beforeSchedule(
   if (rparams.project_persistent_buffers &&
       ir_utils::getViewOps(fusion).empty()) {
     dummy_outputs = reduction_scheduler_utils::projectPersistentBuffers(fusion);
+  }else{
+    fusion->printMath();
+    reduction_scheduler_utils::projectPersistentBuffersToOtherBuffers(fusion);
+    fusion->printMath();
   }
+
 
   // Cache tensors before grabbing any references to reductions as cache_before
   // can invalidate the references since when applied to a reduction tensor view

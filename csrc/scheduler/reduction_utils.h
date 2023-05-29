@@ -88,5 +88,7 @@ TORCH_CUDA_CU_API TensorView* sortAndRFactor(TensorView* reference_tv);
 TORCH_CUDA_CU_API std::vector<TensorView*> projectPersistentBuffers(
     Fusion* fusion);
 
+TORCH_CUDA_CU_API void projectPersistentBuffersToOtherBuffers(
+    Fusion* fusion);
 } // namespace reduction_scheduler_utils
 } // namespace nvfuser
