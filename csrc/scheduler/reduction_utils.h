@@ -86,9 +86,7 @@ TORCH_CUDA_CU_API TensorView* sortAndRFactor(TensorView* reference_tv);
 // function create dummy outputs which should be used in later stages of the
 // scheduling.
 TORCH_CUDA_CU_API std::vector<TensorView*> projectPersistentBuffers(
-    Fusion* fusion);
+    Fusion* fusion, const bool project_to_inputs = true);
 
-TORCH_CUDA_CU_API void projectPersistentBuffersToOtherBuffers(
-    Fusion* fusion);
 } // namespace reduction_scheduler_utils
 } // namespace nvfuser

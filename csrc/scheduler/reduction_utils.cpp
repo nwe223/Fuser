@@ -701,38 +701,68 @@ TensorView* sortAndRFactor(TensorView* reference_tv) {
   return ir_utils::rfactorHelper(reference_tv, rfactor_axes);
 }
 
-std::vector<TensorView*> projectPersistentBuffers(Fusion* fusion) {
-  auto persistent_info = scheduler_utils::persistentBuffers(fusion);
-  std::vector<TensorView*> dummy_outputs;
-
-  // Convenience accessors
-  const auto& persistent_buffers = persistent_info.persistent_buffers;
-  const auto& persistent_resolution_points =
-      persistent_info.persistent_buffer_resolution_points;
-  const auto& projected_buffers =
-      persistent_info.projectable_persistent_buffers;
-
-  TORCH_INTERNAL_ASSERT(
-      persistent_buffers.size() == persistent_resolution_points.size());
-
-  // Iterate through projected buffers, tracking which index it corresponds too
-  // since there's a resolution point entry for every buffer.
-  for (auto buffer_i : c10::irange(persistent_buffers.size())) {
-    auto buffer = persistent_buffers[buffer_i];
-    if (std::find(projected_buffers.begin(), projected_buffers.end(), buffer) ==
-        projected_buffers.end()) {
-      continue;
+// Take all projectable persistent buffers, and move them to the inputs. This
+// function create dummy outputs which should be used in later stages of the
+// scheduling.
+class PersistentBufferProjector {
+  public:
+    PersistentBufferProjector(Fusion* fusion, const bool project_to_inputs) 
+    : fusion_(fusion),
+    persistent_info(scheduler_utils::persistentBuffers(fusion)), 
+    persistent_buffers(persistent_info.persistent_buffers), 
+    persistent_buffer_resolution_points(persistent_info.persistent_buffer_resolution_points), 
+    projectable_persistent_buffers(persistent_info.projectable_persistent_buffers),
+    project_to_inputs_(project_to_inputs) {
+    }
+    const std::vector<TensorView*>& project() {
+      if(project_to_inputs_) {
+        // Iterate through projected buffers, tracking which index it corresponds too
+        // since there's a resolution point entry for every buffer.
+        for (auto buffer_i : c10::irange(persistent_buffers.size())) {
+          auto buffer = persistent_buffers[buffer_i];
+          if (std::find(projectable_persistent_buffers.begin(), projectable_persistent_buffers.end(), buffer) ==
+              projectable_persistent_buffers.end()) {
+            continue;
+          }
+          projectToInputOrImmediatePersistentProducer(buffer_i, fusion_->inputs());
+        }
+      }else{
+        std::unordered_set<TensorView*> persistent_buffer_set(
+          persistent_buffers.begin(), persistent_buffers.end());
+        for (auto buffer_i : c10::irange(persistent_buffers.size())) {
+          auto buffer = persistent_buffers[buffer_i];
+          const auto& producers = ir_utils::producerTvsOf(buffer);
+          if (std::all_of(producers.begin(), producers.end(), [&](auto producer) {
+                return persistent_buffer_set.count(producer) > 0;
+              })) {
+            projectToInputOrImmediatePersistentProducer(buffer_i, std::vector<Val*>(producers.begin(), producers.end()));
+          }
+        }
+      }
+      return dummy_outputs;
     }
 
-    auto resolution_points = persistent_resolution_points[buffer_i];
+  private:
+  Fusion* fusion_;
+  const scheduler_utils::PersistentBufferInfo persistent_info;
+  const std::vector<TensorView*>& persistent_buffers;
+  const std::vector<std::vector<TensorView*>>& persistent_buffer_resolution_points;
+  const std::vector<TensorView*>& projectable_persistent_buffers;
+  std::vector<TensorView*> dummy_outputs;
+  const bool project_to_inputs_;
 
+
+
+  // get all uses of the persistent buffer
+  std::vector<Val*> getPersistentUseOfBuffer(int buffer_i) {
     std::vector<Val*> persistent_use_of_buffer;
-
     // Go through the resolution points one by one. Resolution points are points
     // in which the reduction branch meets the residual branch. These are points
     // where the persitent buffer may no longer be needed (one point could be
     // after another, and the buffer would be needed until the last resolution
     // points)
+    auto buffer = persistent_buffers[buffer_i];
+    auto resolution_points = persistent_buffer_resolution_points[buffer_i];
     for (auto resolution_point : resolution_points) {
       // Need to go through all paths from the persistent buffer to the
       // resolution point
@@ -767,12 +797,16 @@ std::vector<TensorView*> projectPersistentBuffers(Fusion* fusion) {
         persistent_use_of_buffer.emplace_back(use);
       }
     }
+    return persistent_use_of_buffer;
+  }
 
+  void projectToInputOrImmediatePersistentProducer(int buffer_i, const std::vector<Val*>& producers) {
     // For all uses that do not go towards the reduction operations in the
     // persistent section of the graph, recompute the persistent buffer.
-    for (auto use : persistent_use_of_buffer) {
+    auto buffer = persistent_buffers[buffer_i];
+    for (auto use : getPersistentUseOfBuffer(buffer_i)) {
       TORCH_INTERNAL_ASSERT(use->definition() != nullptr);
-      auto buffer_replicate = RecomputeTv::recompute(buffer);
+      auto buffer_replicate = RecomputeTv::recompute(buffer, producers);
       // Create a shortcut buffer <--> buffer_replicate for propagation.
       // Why is this needed?
       // Consider that we have a fusion
@@ -802,83 +836,15 @@ std::vector<TensorView*> projectPersistentBuffers(Fusion* fusion) {
       // See FusionBroadcastPersistentReduction_CUDA for an example
       dummy_outputs.emplace_back(add(buffer_replicate, buffer));
       ir_utils::replaceValInExpr(use->definition(), buffer, buffer_replicate);
-    }
+    }    
   }
-  return dummy_outputs;
+};
+
+
+std::vector<TensorView*> projectPersistentBuffers(Fusion* fusion, const bool project_to_inputs) {
+  PersistentBufferProjector pb_projector(fusion, project_to_inputs);
+  return pb_projector.project();
 }
 
-void projectPersistentBuffersToOtherBuffers(Fusion* fusion) {
-  auto persistent_info = scheduler_utils::persistentBuffers(fusion);
-
-  // Convenience accessors
-  const auto& persistent_buffers = persistent_info.persistent_buffers;
-  const auto& persistent_resolution_points =
-      persistent_info.persistent_buffer_resolution_points;
-  TORCH_INTERNAL_ASSERT(
-      persistent_buffers.size() == persistent_resolution_points.size());
-
-  // step-1, check which persistent buffers can be recalculated from other persistent buffers
-  // key buffer can be recalculated from val buffer
-  std::unordered_map<TensorView*, std::vector<TensorView*>> buffer_to_buffer_replicate;
-  // convert from vector to unordered_set for faster lookup
-  std::unordered_set<TensorView*> persistent_buffer_set(
-      persistent_buffers.begin(), persistent_buffers.end());
-  for(auto buffer : persistent_buffers) {
-    // check if all my immediate producers are persistent buffers
-    const auto& producers = ir_utils::producerTvsOf(buffer);
-    if (std::all_of(producers.begin(), producers.end(), [&](auto producer) {
-          return persistent_buffer_set.count(producer) > 0;
-        })) {
-      // if so, I can be recalculated from my immediate producers
-      buffer_to_buffer_replicate[buffer] = producers;
-      std::cout << "buffer= " << buffer->toString() << " producers= " << producers[0]->toString() << " producers= " << producers.size()<< std::endl;
-    }
-  }
-
-  // step-2, recalculate
-  // loop over buffer_to_buffer_replicate
-  for(const auto& kv : buffer_to_buffer_replicate) {
-    auto buffer = kv.first;
-    int buffer_i = std::find(persistent_buffers.begin(), persistent_buffers.end(), buffer) -
-        persistent_buffers.begin();
-
-    auto resolution_points = persistent_resolution_points[buffer_i];
-    std::vector<Val*> persistent_use_of_buffer;
-    for (auto resolution_point : resolution_points) {
-      auto chains_to_resolution =
-          DependencyCheck::getAllDependencyChains(buffer, resolution_point);
-      for (auto chain : chains_to_resolution) {
-        auto tv_chain = ir_utils::filterByType<TensorView>(chain);
-        if (std::any_of(tv_chain.begin(), tv_chain.end(), [](TensorView* tv) {
-              return tv->hasReduction();
-            })) {
-          continue;
-        }
-        auto use = chain[1];
-        if (std::find(
-                persistent_use_of_buffer.begin(),
-                persistent_use_of_buffer.end(),
-                use) != persistent_use_of_buffer.end()) {
-          continue;
-        }
-        persistent_use_of_buffer.emplace_back(use);
-      }
-    }
-
-    // For all uses that do not go towards the reduction operations in the
-    // persistent section of the graph, recompute the persistent buffer.
-    for (auto use : persistent_use_of_buffer) {
-      TORCH_INTERNAL_ASSERT(use->definition() != nullptr);
-      std::cout << "use->definition()= " << use->definition()->toString() << std::endl;
-      // auto buffer_replicate = RecomputeTv::recompute(buffer);
-      auto buffer_replicate = RecomputeTv::recompute(buffer, std::vector<Val*>(kv.second.begin(), kv.second.end()));
-      ir_utils::replaceValInExpr(use->definition(), buffer, buffer_replicate);
-      std::cout << "buffer_replicate->definition()= " << buffer_replicate->definition()->toString() << std::endl;
-  //     buffer_replicate->definition()= T11_l[ iS22{i0}, iS23{i2} ]
-  //  = __half2float(T10_l[ iS20{i0}, iS21{i2} ]);
-      std::cout << "use->definition()= " << use->definition()->toString() << std::endl;
-    }
-  }
-}
 } // namespace reduction_scheduler_utils
 } // namespace nvfuser

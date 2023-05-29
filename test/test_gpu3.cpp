@@ -8477,6 +8477,17 @@ TEST_F(NVFuserTest, FusionLayerNormFusedOpsRedundantCast_CUDA) {
     outputs.emplace_back(t33);
   }
 
+  auto persistent_buffer_info1 = scheduler_utils::persistentBuffers(fusion);
+  TORCH_CHECK(
+      persistent_buffer_info1.persistent_buffers.size() == 2,
+      "Before project to other buffers, should have two persistent buffers!");
+
+  reduction_scheduler_utils::projectPersistentBuffers(fusion, false);
+  auto persistent_buffer_info2 = scheduler_utils::persistentBuffers(fusion);
+  TORCH_CHECK(
+      persistent_buffer_info2.persistent_buffers.size() == 1,
+      "After project to other buffers, should have one persistent buffer!");
+
   FusionExecutorCache fec(std::move(fusion_ptr));
   auto cg_outputs = fec.runFusionWithInputs(inputs);
   testValidate(fusion, cg_outputs, inputs, outputs, __LINE__, __FILE__);
@@ -8636,6 +8647,17 @@ TEST_F(NVFuserTest, FusionRecomputePersistentBuffer_CUDA) {
     outputs.emplace_back(t7);
     outputs.emplace_back(t9);
   }
+
+  auto persistent_buffer_info1 = scheduler_utils::persistentBuffers(fusion);
+  TORCH_CHECK(
+      persistent_buffer_info1.persistent_buffers.size() == 2,
+      "Before project to other buffers, should have two persistent buffers!");
+
+  reduction_scheduler_utils::projectPersistentBuffers(fusion, false);
+  auto persistent_buffer_info2 = scheduler_utils::persistentBuffers(fusion);
+  TORCH_CHECK(
+      persistent_buffer_info2.persistent_buffers.size() == 1,
+      "After project to other buffers, should have one persistent buffer!");
 
   FusionExecutorCache fec(std::move(fusion_ptr));
   auto cg_outputs = fec.runFusionWithInputs(inputs);
