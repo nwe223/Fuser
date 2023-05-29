@@ -705,53 +705,58 @@ TensorView* sortAndRFactor(TensorView* reference_tv) {
 // function create dummy outputs which should be used in later stages of the
 // scheduling.
 class PersistentBufferProjector {
-  public:
-    PersistentBufferProjector(Fusion* fusion, const bool project_to_inputs) 
-    : fusion_(fusion),
-    persistent_info(scheduler_utils::persistentBuffers(fusion)), 
-    persistent_buffers(persistent_info.persistent_buffers), 
-    persistent_buffer_resolution_points(persistent_info.persistent_buffer_resolution_points), 
-    projectable_persistent_buffers(persistent_info.projectable_persistent_buffers),
-    project_to_inputs_(project_to_inputs) {
-    }
-    const std::vector<TensorView*>& project() {
-      if(project_to_inputs_) {
-        // Iterate through projected buffers, tracking which index it corresponds too
-        // since there's a resolution point entry for every buffer.
-        for (auto buffer_i : c10::irange(persistent_buffers.size())) {
-          auto buffer = persistent_buffers[buffer_i];
-          if (std::find(projectable_persistent_buffers.begin(), projectable_persistent_buffers.end(), buffer) ==
-              projectable_persistent_buffers.end()) {
-            continue;
-          }
-          projectToInputOrImmediatePersistentProducer(buffer_i, fusion_->inputs());
+ public:
+  PersistentBufferProjector(Fusion* fusion, const bool project_to_inputs)
+      : fusion_(fusion),
+        persistent_info(scheduler_utils::persistentBuffers(fusion)),
+        persistent_buffers(persistent_info.persistent_buffers),
+        persistent_buffer_resolution_points(
+            persistent_info.persistent_buffer_resolution_points),
+        projectable_persistent_buffers(
+            persistent_info.projectable_persistent_buffers),
+        project_to_inputs_(project_to_inputs) {}
+
+  const std::vector<TensorView*>& project() {
+    if (project_to_inputs_) {
+      // Iterate through projected buffers, tracking which index it corresponds
+      // too since there's a resolution point entry for every buffer.
+      for (auto buffer_i : c10::irange(persistent_buffers.size())) {
+        auto buffer = persistent_buffers[buffer_i];
+        if (std::find(
+                projectable_persistent_buffers.begin(),
+                projectable_persistent_buffers.end(),
+                buffer) == projectable_persistent_buffers.end()) {
+          continue;
         }
-      }else{
-        std::unordered_set<TensorView*> persistent_buffer_set(
+        projectToInputOrImmediatePersistentProducer(
+            buffer_i, fusion_->inputs());
+      }
+    } else {
+      std::unordered_set<TensorView*> persistent_buffer_set(
           persistent_buffers.begin(), persistent_buffers.end());
-        for (auto buffer_i : c10::irange(persistent_buffers.size())) {
-          auto buffer = persistent_buffers[buffer_i];
-          const auto& producers = ir_utils::producerTvsOf(buffer);
-          if (std::all_of(producers.begin(), producers.end(), [&](auto producer) {
-                return persistent_buffer_set.count(producer) > 0;
-              })) {
-            projectToInputOrImmediatePersistentProducer(buffer_i, std::vector<Val*>(producers.begin(), producers.end()));
-          }
+      for (auto buffer_i : c10::irange(persistent_buffers.size())) {
+        auto buffer = persistent_buffers[buffer_i];
+        const auto& producers = ir_utils::producerTvsOf(buffer);
+        if (producers.size() && std::all_of(producers.begin(), producers.end(), [&](auto producer) {
+              return persistent_buffer_set.count(producer) > 0;
+            })) {
+          projectToInputOrImmediatePersistentProducer(
+              buffer_i, std::vector<Val*>(producers.begin(), producers.end()));
         }
       }
-      return dummy_outputs;
     }
+    return dummy_outputs;
+  }
 
-  private:
+ private:
   Fusion* fusion_;
   const scheduler_utils::PersistentBufferInfo persistent_info;
   const std::vector<TensorView*>& persistent_buffers;
-  const std::vector<std::vector<TensorView*>>& persistent_buffer_resolution_points;
+  const std::vector<std::vector<TensorView*>>&
+      persistent_buffer_resolution_points;
   const std::vector<TensorView*>& projectable_persistent_buffers;
   std::vector<TensorView*> dummy_outputs;
   const bool project_to_inputs_;
-
-
 
   // get all uses of the persistent buffer
   std::vector<Val*> getPersistentUseOfBuffer(int buffer_i) {
@@ -800,7 +805,9 @@ class PersistentBufferProjector {
     return persistent_use_of_buffer;
   }
 
-  void projectToInputOrImmediatePersistentProducer(int buffer_i, const std::vector<Val*>& producers) {
+  void projectToInputOrImmediatePersistentProducer(
+      int buffer_i,
+      const std::vector<Val*>& producers) {
     // For all uses that do not go towards the reduction operations in the
     // persistent section of the graph, recompute the persistent buffer.
     auto buffer = persistent_buffers[buffer_i];
@@ -836,12 +843,13 @@ class PersistentBufferProjector {
       // See FusionBroadcastPersistentReduction_CUDA for an example
       dummy_outputs.emplace_back(add(buffer_replicate, buffer));
       ir_utils::replaceValInExpr(use->definition(), buffer, buffer_replicate);
-    }    
+    }
   }
 };
 
-
-std::vector<TensorView*> projectPersistentBuffers(Fusion* fusion, const bool project_to_inputs) {
+std::vector<TensorView*> projectPersistentBuffers(
+    Fusion* fusion,
+    const bool project_to_inputs) {
   PersistentBufferProjector pb_projector(fusion, project_to_inputs);
   return pb_projector.project();
 }
